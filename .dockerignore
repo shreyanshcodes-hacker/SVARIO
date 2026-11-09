@@ -1,0 +1,34 @@
+# Dependencies & Virtual Environments
+**/node_modules
+**/.pnp
+**/.pnp.js
+**/.venv
+**/venv
+**/ENV
+**/env
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache
+
+# Build artifacts
+apps/web/.next
+apps/web/out
+apps/web/build
+apps/web/coverage
+
+# Git & IDE
+.git
+.gitignore
+.vscode
+.idea
+*.log
+
+# Local secrets (passed at runtime via --env-file or docker-compose env_file)
+.env
+.env.*
+!.env.example
+apps/api/.env
+apps/web/.env
+apps/web/.env.local

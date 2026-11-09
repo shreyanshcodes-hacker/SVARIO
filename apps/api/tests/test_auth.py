@@ -164,7 +164,7 @@ def test_disallowed_algorithm_rejected_with_401(auth_client: TestClient) -> None
             "aud": TEST_AUDIENCE,
             "exp": int((datetime.now(timezone.utc) + timedelta(minutes=10)).timestamp()),
         },
-        "some-symmetric-secret",
+        "some-symmetric-secret-at-least-32-bytes-long",
         algorithm="HS256",
     )
     response = auth_client.get(

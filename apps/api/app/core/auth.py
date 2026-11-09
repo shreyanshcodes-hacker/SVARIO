@@ -56,7 +56,13 @@ def _unauthorized(message: str) -> HTTPException:
 @lru_cache(maxsize=8)
 def _get_cached_jwk_client(jwks_url: str) -> PyJWKClient:
     """Return a cached PyJWKClient with key caching enabled."""
-    return PyJWKClient(jwks_url, cache_keys=True, max_cached_keys=16)
+    return PyJWKClient(
+        jwks_url,
+        cache_keys=True,
+        max_cached_keys=16,
+        headers={"User-Agent": "Svario-API/0.2.0"},
+        timeout=10,
+    )
 
 
 class SupabaseJWTVerifier:

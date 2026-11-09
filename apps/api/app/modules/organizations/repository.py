@@ -371,7 +371,10 @@ class SupabaseRestOrganizationRepository:
 
             org_resp = await client.post(
                 f"{self._base_url}/rest/v1/organizations",
-                headers=self._headers(actor),
+                headers={
+                    **self._headers(actor),
+                    "Prefer": "return=minimal",
+                },
                 json={
                     "id": str(org_id),
                     "name": payload.name,
@@ -389,7 +392,6 @@ class SupabaseRestOrganizationRepository:
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail="Failed to create organization in Supabase.",
                 )
-            org_row = org_resp.json()[0]
 
             member_resp = await client.post(
                 f"{self._base_url}/rest/v1/organization_members",
@@ -405,6 +407,26 @@ class SupabaseRestOrganizationRepository:
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail="Failed to assign owner membership in Supabase.",
                 )
+
+            org_fetch = await client.get(
+                f"{self._base_url}/rest/v1/organizations",
+                headers=self._headers(actor),
+                params={"id": f"eq.{org_id}", "select": "*"},
+            )
+            org_rows = org_fetch.json() if org_fetch.status_code < 400 else []
+            now_iso = datetime.now(timezone.utc).isoformat()
+            org_row = (
+                org_rows[0]
+                if org_rows
+                else {
+                    "id": str(org_id),
+                    "name": payload.name,
+                    "slug": slug,
+                    "industry": payload.industry.value,
+                    "created_at": now_iso,
+                    "updated_at": now_iso,
+                }
+            )
 
             business_id = uuid4()
             await client.post(

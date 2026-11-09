@@ -270,6 +270,24 @@ CREATE TABLE IF NOT EXISTS public.onboarding_progress (
 CREATE INDEX IF NOT EXISTS idx_onboarding_progress_org_business
     ON public.onboarding_progress (organization_id, business_id);
 
+-- Covering indexes matching composite foreign key column order (business_id, organization_id)
+CREATE INDEX IF NOT EXISTS idx_business_settings_business_org
+    ON public.business_settings (business_id, organization_id);
+CREATE INDEX IF NOT EXISTS idx_business_hours_business_org
+    ON public.business_hours (business_id, organization_id);
+CREATE INDEX IF NOT EXISTS idx_business_profiles_business_org
+    ON public.business_profiles (business_id, organization_id);
+CREATE INDEX IF NOT EXISTS idx_business_languages_business_org
+    ON public.business_languages (business_id, organization_id);
+CREATE INDEX IF NOT EXISTS idx_business_faqs_business_org
+    ON public.business_faqs (business_id, organization_id);
+CREATE INDEX IF NOT EXISTS idx_assistant_settings_business_org
+    ON public.assistant_settings (business_id, organization_id);
+CREATE INDEX IF NOT EXISTS idx_escalation_settings_business_org
+    ON public.escalation_settings (business_id, organization_id);
+CREATE INDEX IF NOT EXISTS idx_onboarding_progress_business_org
+    ON public.onboarding_progress (business_id, organization_id);
+
 DROP TRIGGER IF EXISTS trg_onboarding_progress_set_updated_at ON public.onboarding_progress;
 CREATE TRIGGER trg_onboarding_progress_set_updated_at
     BEFORE UPDATE ON public.onboarding_progress

@@ -1,0 +1,73 @@
+name: svario
+
+services:
+  svario-api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: svario-api
+    restart: unless-stopped
+    env_file:
+      - path: ./apps/api/.env
+        required: false
+    environment:
+      SVARIO_ENV: development
+      SVARIO_STAGE: 0
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  svario-web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_APP_NAME: SVARIO
+        NEXT_PUBLIC_APP_STAGE: 2
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+        NEXT_PUBLIC_SITE_URL: http://localhost:3000
+        NEXT_PUBLIC_SUPABASE_URL: https://pxijyektjscrltwpvzua.supabase.co
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB4aWp5ZWt0anNjcmx0d3B2enVhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM3MjI5MjMsImV4cCI6MjEwOTI5ODkyM30._cSA-iuNLQhQf_Ek66VgNTlfckwEvLrjGc2UCu-6uwI
+    container_name: svario-web
+    restart: unless-stopped
+    depends_on:
+      svario-api:
+        condition: service_healthy
+    env_file:
+      - path: ./apps/web/.env.local
+        required: false
+    environment:
+      PORT: 3000
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+
+  # Optional unified single-container Ubuntu service (run with: docker compose --profile unified up --build)
+  svario-unified:
+    profiles: ["unified"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: svario-unified
+    restart: unless-stopped
+    env_file:
+      - path: ./apps/api/.env
+        required: false
+      - path: ./apps/web/.env.local
+        required: false
+    environment:
+      SVARIO_RUN_MODE: all
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      PORT: 3000
+    ports:
+      - "3000:3000"
+      - "8000:8000"

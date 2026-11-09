@@ -1,16 +1,24 @@
 """Environment-based Pydantic configuration for Svario API (Stage 0 & Stage 1)."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import List, Optional
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_API_DIR = Path(__file__).resolve().parents[2]
+_REPO_ROOT = _API_DIR.parent.parent
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables or .env file."""
 
     model_config = SettingsConfigDict(
-        env_file=(".env", "../../.env"),
+        env_file=(
+            str(_API_DIR / ".env"),
+            str(_REPO_ROOT / ".env"),
+            ".env",
+        ),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
