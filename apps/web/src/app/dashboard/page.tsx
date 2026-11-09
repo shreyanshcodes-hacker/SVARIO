@@ -141,12 +141,20 @@ export default function DashboardPage(): React.JSX.Element {
 
           <div className="flex flex-wrap items-center gap-3">
             {activeOrganization && (
-              <Link
-                href="/onboarding"
-                className="rounded-xl border border-[#7657F6]/60 bg-[#7657F6]/20 px-3.5 py-1.5 text-xs font-semibold text-[#F5F7FC] transition hover:bg-[#7657F6]/35"
-              >
-                {isCompleted ? "Edit Settings" : "Continue Onboarding"}
-              </Link>
+              <>
+                <Link
+                  href="/voice-test"
+                  className="rounded-xl border border-[#36C6D3]/60 bg-[#36C6D3]/15 px-3.5 py-1.5 text-xs font-semibold text-[#36C6D3] transition hover:bg-[#36C6D3]/25"
+                >
+                  Voice Test Lab
+                </Link>
+                <Link
+                  href="/onboarding"
+                  className="rounded-xl border border-[#7657F6]/60 bg-[#7657F6]/20 px-3.5 py-1.5 text-xs font-semibold text-[#F5F7FC] transition hover:bg-[#7657F6]/35"
+                >
+                  {isCompleted ? "Edit Settings" : "Continue Onboarding"}
+                </Link>
+              </>
             )}
             <OrganizationSwitcher
               onNewOrganizationClick={() => setShowCreateModal(true)}

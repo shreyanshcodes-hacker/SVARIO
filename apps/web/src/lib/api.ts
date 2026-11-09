@@ -20,7 +20,10 @@ import type {
   OrganizationIndustryType,
   OrganizationMember,
   OrganizationSummary,
+  PublicVoiceTokenResponseData,
   VerifiedBackendUser,
+  VoiceSessionCreatePayload,
+  VoiceSessionCreateResponseData,
   WeekdayHoursItemData,
 } from "@/types/platform";
 
@@ -430,4 +433,53 @@ export async function updateOnboardingProgressApi(
   }
 
   return (await response.json()) as OnboardingProgressData;
+}
+
+// --- Stage 3: Shared Browser Voice Session APIs ---
+
+export async function createVoiceSessionApi(
+  payload: VoiceSessionCreatePayload,
+  accessToken?: string | null
+): Promise<VoiceSessionCreateResponseData> {
+  const headers: HeadersInit = accessToken
+    ? buildAuthHeaders(accessToken)
+    : {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      };
+
+  const response = await fetch(`${getApiBaseUrl()}/api/v1/voice/sessions`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseApiError(response));
+  }
+
+  return (await response.json()) as VoiceSessionCreateResponseData;
+}
+
+export async function createPublicVoiceTokenApi(
+  accessToken: string,
+  organizationId: string,
+  ttlSeconds = 3600
+): Promise<PublicVoiceTokenResponseData> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/v1/organizations/${encodeURIComponent(organizationId)}/voice/public-token`,
+    {
+      method: "POST",
+      headers: buildAuthHeaders(accessToken),
+      body: JSON.stringify({ ttl_seconds: ttlSeconds }),
+      cache: "no-store",
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(await parseApiError(response));
+  }
+
+  return (await response.json()) as PublicVoiceTokenResponseData;
 }

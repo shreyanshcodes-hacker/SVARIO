@@ -1,7 +1,7 @@
-# SVARIO — Local Development & Supabase Setup Guide
+# SVARIO — Local Development, Supabase & Voice Infrastructure Guide
 
-**Milestone:** Stage 2 — Industry Selection & Business Onboarding  
-**Stack:** Next.js 15 + TypeScript + Tailwind CSS v4 + `@supabase/supabase-js` | FastAPI + Pydantic v2 + `PyJWT[crypto]`
+**Milestone:** Stage 3 — Shared Browser Voice Infrastructure  
+**Stack:** Next.js 15 + TypeScript + Tailwind CSS v4 + WebRTC | FastAPI + Pydantic v2 + `PyJWT[crypto]` + OpenAI Realtime API
 
 ---
 
@@ -9,100 +9,74 @@
 
 - **Node.js:** v20+ (v24 recommended) and `npm`
 - **Python:** Python 3.11+ and `pip`
-- **Supabase Project:** A Supabase cloud project or local Supabase CLI stack (`supabase start`) for live authentication and database persistence.
+- **Supabase Project:** A Supabase cloud project or local Supabase CLI stack (`supabase start`).
+- **OpenAI API Key:** A backend-only OpenAI API key with access to the OpenAI Realtime API (`OPENAI_API_KEY` in `apps/api/.env`).
 
 ---
 
-## 2. Supabase Project & Dashboard Configuration
+## 2. Backend Environment Configuration (`apps/api/.env`)
 
-1. **Create or Open a Supabase Project** in the Supabase Dashboard.
-2. **Inspect JWT Signing Settings:**
-   - Navigate to **Project Settings → API → JWT Settings**.
-   - Locate the **JWKS URL**: `https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json`.
-   - Svario uses asymmetric JWT verification (`ES256`/`RS256`/`EdDSA`) via JWKS by default. If your project uses legacy symmetric `HS256`, either enable asymmetric signing keys in Supabase Auth or set `SUPABASE_JWT_ALGORITHMS=HS256` and `SUPABASE_JWT_SECRET=<your-jwt-secret>` in `apps/api/.env`.
-3. **Configure Authentication Redirect URLs:**
-   - Navigate to **Authentication → URL Configuration**:
-     - **Site URL:** `http://localhost:3000` (or your production Vercel URL)
-     - **Redirect URLs (Allowlist):**
-       - `http://localhost:3000/dashboard`
-       - `http://localhost:3000/onboarding`
-       - `http://localhost:3000/reset-password`
-       - `http://localhost:3000/login`
-4. **Email Auth Provider:**
-   - Navigate to **Authentication → Providers → Email** and ensure **Enable Email provider** is turned on.
+Copy `apps/api/.env.example` to `apps/api/.env` and configure:
 
----
+```env
+# Supabase JWT Verification
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_ANON_KEY=your-supabase-anon-key
+SUPABASE_JWKS_URL=https://your-project-ref.supabase.co/auth/v1/.well-known/jwks.json
+SUPABASE_JWT_ISSUER=https://your-project-ref.supabase.co/auth/v1
+SUPABASE_JWT_AUDIENCE=authenticated
+SUPABASE_JWT_ALGORITHMS=ES256,RS256,EdDSA
 
-## 3. Applying Database Migrations (`supabase/migrations/`)
-
-Svario's Stage 1 & Stage 2 database schemas and Row Level Security policies are stored in:
-1. `supabase/migrations/20261103000001_stage1_core_schema.sql`
-2. `supabase/migrations/20261103000002_stage1_rls_policies.sql`
-3. `supabase/migrations/20261108000003_stage2_onboarding_schema.sql`
-4. `supabase/migrations/20261108000004_stage2_onboarding_rls.sql`
-
-### Option A: Using Supabase CLI
-```powershell
-supabase link --project-ref <your-project-ref>
-supabase db push
+# Stage 3 — OpenAI Realtime Voice Infrastructure (Backend-Only)
+OPENAI_API_KEY=sk-proj-...
+OPENAI_REALTIME_MODEL=gpt-4o-realtime-preview
+OPENAI_REALTIME_VOICE=alloy
+OPENAI_REALTIME_API_BASE_URL=https://api.openai.com/v1
+OPENAI_REALTIME_SESSION_TTL_SECONDS=120
+OPENAI_REALTIME_MODALITIES=audio,text
+VOICE_SESSION_RATE_LIMIT_PER_MINUTE=10
+VOICE_PUBLIC_TOKEN_SECRET=your-random-hmac-secret
+VOICE_PUBLIC_TOKEN_TTL_SECONDS=3600
 ```
 
-### Option B: Using `psql` or Supabase SQL Editor
-Run the migration files in chronological order:
-1. Execute `supabase/migrations/20261103000001_stage1_core_schema.sql`
-2. Execute `supabase/migrations/20261103000002_stage1_rls_policies.sql`
-3. Execute `supabase/migrations/20261108000003_stage2_onboarding_schema.sql`
-4. Execute `supabase/migrations/20261108000004_stage2_onboarding_rls.sql`
+> **Security Rule:** `OPENAI_API_KEY` must remain in `apps/api/.env` only. Never place it in `apps/web/.env.local` or any `NEXT_PUBLIC_*` variable.
 
 ---
 
-## 4. Stage 2 Onboarding API Endpoints
+## 3. Stage 3 Voice API Endpoints
 
-All Stage 2 onboarding endpoints require `Authorization: Bearer <supabase-jwt>` and verify organization membership (`SELECT` allowed for `owner | admin | staff`; mutations restricted to `owner | admin`):
-
-- `GET /api/v1/organizations/{organization_id}/onboarding` — Returns complete onboarding bundle (`organization`, `profile`, `hours`, `languages`, `assistant`, `faqs`, `faq_templates`, `escalation`, `healthcare_safeguards`, `progress`).
-- `PUT /api/v1/organizations/{organization_id}/onboarding/industry` — Updates organization industry (`salon | clinic | hospital`).
-- `GET/PUT /api/v1/organizations/{organization_id}/onboarding/profile` — Reads or updates 1:1 `business_profiles` record.
-- `GET/PUT /api/v1/organizations/{organization_id}/onboarding/hours` — Reads or replaces 7-day `business_hours` schedule.
-- `GET/PUT /api/v1/organizations/{organization_id}/onboarding/languages` — Reads or updates primary & supported `business_languages` (`en | hi | hinglish`).
-- `GET/PUT /api/v1/organizations/{organization_id}/onboarding/assistant` — Reads or updates `assistant_settings`.
-- `GET/POST /api/v1/organizations/{organization_id}/onboarding/faqs` — Lists or creates `business_faqs`.
-- `PUT/DELETE /api/v1/organizations/{organization_id}/onboarding/faqs/{faq_id}` — Updates or deletes an organization-owned FAQ.
-- `GET/PUT /api/v1/organizations/{organization_id}/onboarding/escalation` — Reads or updates `escalation_settings`.
-- `GET/PUT /api/v1/organizations/{organization_id}/onboarding/progress` — Reads or updates `onboarding_progress` (`current_step`, `completed_steps`, `is_completed`).
+1. `POST /api/v1/voice/sessions`
+   - Validates the caller's authorization (`organization_member` via verified Supabase Bearer JWT, or `public_visitor` via HMAC-signed `public_access_token`).
+   - Enforces per-caller sliding-window rate limiting (`429 Too Many Requests`).
+   - Composes server-authoritative system instructions from the business's Stage 2 onboarding bundle (including mandatory administrative-only healthcare guardrails for `clinic` and `hospital`).
+   - Mints a short-lived ephemeral OpenAI Realtime session credential (`ek_...`) and returns only the required WebRTC connection metadata.
+2. `POST /api/v1/organizations/{organization_id}/voice/public-token`
+   - Restricted to organization `owner` or `admin` members when `assistant.enabled == True`.
+   - Mints a short-lived HMAC-SHA256 signed `public_access_token` bound to `(organization_id, business_id)` for deliberate public visitor voice access.
 
 ---
 
-## 5. Running the Applications
+## 4. Testing Browser Voice Locally (`/voice-test`)
 
-### Start Backend (`apps/api` — Port 8000)
-```powershell
-cd apps/api
-pip install -r requirements.txt
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-### Start Frontend (`apps/web` — Port 3000)
-```powershell
-cd apps/web
-npm install
-npm run dev
-```
+1. Start the backend (`apps/api` on port `8000`) and frontend (`apps/web` on port `3000`).
+2. Sign in at `http://localhost:3000/login`, complete or review your business configuration in `/onboarding`, and click **Voice Test Lab** on `/dashboard` (or navigate directly to `http://localhost:3000/voice-test`).
+3. Select your organization and preferred Realtime voice preset, then click **Start Conversation**.
+4. Grant browser microphone permission when prompted to establish the WebRTC session.
 
 ---
 
-## 6. Running Automated Tests
+## 5. Running Automated Tests
 
-### Backend Tests (Auth, Organizations, Onboarding, Static RLS Audit & Live RLS Harness)
+### Backend Tests (`apps/api`)
 ```powershell
 cd apps/api
 python -m pytest -v
 ```
 
-### Frontend Unit Tests, Lint, Typecheck & Production Build
+### Frontend Unit Tests, Lint, Typecheck & Production Build (`apps/web`)
 ```powershell
 cd apps/web
-npm test
+npm test -- --run
 npm run lint
 npm run typecheck
 npm run build

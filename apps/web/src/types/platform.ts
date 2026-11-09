@@ -281,3 +281,81 @@ export interface OnboardingBundleData {
   healthcare_safeguards: HealthcareSafeguardNoticeData;
   progress: OnboardingProgressData;
 }
+
+// --- Stage 3: Shared Browser Voice Infrastructure Types ---
+
+export type VoiceAccessModeType = "organization_member" | "public_visitor";
+
+export type RealtimeVoicePresetType =
+  | "alloy"
+  | "ash"
+  | "ballad"
+  | "coral"
+  | "echo"
+  | "sage"
+  | "shimmer"
+  | "verse"
+  | "marin"
+  | "cedar";
+
+export interface VoiceSessionCreatePayload {
+  organization_id: string;
+  business_id?: string;
+  access_mode?: VoiceAccessModeType;
+  public_access_token?: string;
+  voice_override?: RealtimeVoicePresetType;
+}
+
+export interface EphemeralClientSecretData {
+  value: string;
+  expires_at: string;
+  ttl_seconds: number;
+}
+
+export interface VoiceSessionCapabilitiesData {
+  modalities: string[];
+  barge_in_enabled: boolean;
+  raw_audio_storage_enabled: boolean;
+  transcript_storage_enabled: boolean;
+  appointment_booking_enabled: boolean;
+  industry_workflows_enabled: boolean;
+}
+
+export interface SafeVoiceAssistantContextData {
+  business_name: string;
+  assistant_name: string;
+  greeting: string;
+  primary_language: LanguageCodeType;
+  supported_languages: LanguageCodeType[];
+  personality: AssistantPersonalityType;
+  response_style: AssistantResponseStyleType;
+  assistant_enabled: boolean;
+  administrative_only_guardrails: boolean;
+  audio_persistence_enabled: boolean;
+  transcript_persistence_enabled: boolean;
+}
+
+export interface VoiceSessionCreateResponseData {
+  session_id: string;
+  organization_id: string;
+  business_id: string;
+  industry: OrganizationIndustryType;
+  access_mode: VoiceAccessModeType;
+  model: string;
+  voice: string;
+  webrtc_url: string;
+  webrtc_calls_url: string;
+  data_channel_label: string;
+  client_secret: EphemeralClientSecretData;
+  capabilities: VoiceSessionCapabilitiesData;
+  assistant_context: SafeVoiceAssistantContextData;
+}
+
+export interface PublicVoiceTokenResponseData {
+  organization_id: string;
+  business_id: string;
+  industry: OrganizationIndustryType;
+  public_access_token: string;
+  expires_at: string;
+  ttl_seconds: number;
+}
