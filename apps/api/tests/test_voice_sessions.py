@@ -315,11 +315,12 @@ def test_short_lived_credential_contract_and_secrets_never_exposed() -> None:
 
         # Verify healthcare administrative-only guardrails are enforced for clinic & hospital
         last_upstream = upstream_calls[-1]
-        assert last_upstream["input_audio_transcription"] is None
+        session_cfg = last_upstream["session"]
+        assert session_cfg["audio"]["input"]["transcription"] is None
         if industry in {"clinic", "hospital"}:
             assert body["assistant_context"]["administrative_only_guardrails"] is True
-            assert "ADMINISTRATIVE-ONLY" in last_upstream["instructions"]
-            assert "NEVER provide medical diagnosis" in last_upstream["instructions"]
+            assert "ADMINISTRATIVE-ONLY" in session_cfg["instructions"]
+            assert "NEVER provide medical diagnosis" in session_cfg["instructions"]
         else:
             assert body["assistant_context"]["administrative_only_guardrails"] is False
 

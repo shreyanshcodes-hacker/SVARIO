@@ -81,7 +81,7 @@ class Settings(BaseSettings):
         repr=False,
     )
     openai_realtime_model: str = Field(
-        default="gpt-4o-realtime-preview",
+        default="gpt-realtime",
         validation_alias="OPENAI_REALTIME_MODEL",
     )
     openai_realtime_voice: str = Field(
@@ -222,7 +222,21 @@ class Settings(BaseSettings):
         return self.openai_realtime_api_base_url.strip().rstrip("/")
 
 
-@lru_cache
-def get_settings() -> Settings:
-    """Return cached application settings instance."""
+@lru_cache(maxsize=4)
+def _load_settings_cached(_env_mtime_ns: int) -> Settings:
+    """Internal cached settings loader keyed by .env modification timestamp."""
     return Settings()
+
+
+def get_settings() -> Settings:
+    """Return application settings instance, automatically reloading if .env changes."""
+    env_path = _API_DIR / ".env"
+    try:
+        mtime_ns = env_path.stat().st_mtime_ns if env_path.exists() else 0
+    except OSError:
+        mtime_ns = 0
+    return _load_settings_cached(mtime_ns)
+
+
+# Provide cache_clear() compatibility for tests
+get_settings.cache_clear = _load_settings_cached.cache_clear  # type: ignore[attr-defined]

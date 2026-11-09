@@ -51,17 +51,16 @@ RealtimeUpstreamCallable = Callable[
 async def _default_openai_realtime_mint(
     settings: Settings, session_payload: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """Call OpenAI's official Realtime session endpoint to mint an ephemeral client token."""
+    """Call OpenAI's official GA Realtime client_secrets endpoint to mint an ephemeral client token."""
     api_key = (settings.openai_api_key or "").strip()
-    endpoint = f"{settings.effective_realtime_base_url}/realtime/sessions"
+    endpoint = f"{settings.effective_realtime_base_url}/realtime/client_secrets"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
-        "OpenAI-Beta": "realtime=v1",
     }
 
     try:
-        async with httpx.AsyncClient(timeout=12.0) as client:
+        async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(endpoint, headers=headers, json=session_payload)
     except httpx.HTTPError as exc:
         raise HTTPException(
@@ -104,16 +103,16 @@ def _extract_ephemeral_secret(
     ephemeral_value: Optional[str] = None
     raw_expires_at: Any = None
 
-    if isinstance(raw_secret_obj, dict):
+    if isinstance(upstream_data.get("value"), str) and upstream_data["value"].strip():
+        ephemeral_value = upstream_data["value"].strip()
+        raw_expires_at = upstream_data.get("expires_at")
+    elif isinstance(raw_secret_obj, dict):
         val = raw_secret_obj.get("value")
         if isinstance(val, str) and val.strip():
             ephemeral_value = val.strip()
         raw_expires_at = raw_secret_obj.get("expires_at")
     elif isinstance(raw_secret_obj, str) and raw_secret_obj.strip():
         ephemeral_value = raw_secret_obj.strip()
-        raw_expires_at = upstream_data.get("expires_at")
-    elif isinstance(upstream_data.get("value"), str) and upstream_data["value"].strip():
-        ephemeral_value = upstream_data["value"].strip()
         raw_expires_at = upstream_data.get("expires_at")
 
     if not ephemeral_value:
@@ -149,7 +148,13 @@ def _extract_ephemeral_secret(
             pass
 
     ttl_seconds = max(1, int((expires_at - now).total_seconds()))
-    session_id = str(upstream_data.get("id") or f"sess_{uuid4().hex[:16]}")
+    nested_session = upstream_data.get("session")
+    nested_id = (
+        nested_session.get("id")
+        if isinstance(nested_session, dict) and nested_session.get("id")
+        else None
+    )
+    session_id = str(nested_id or upstream_data.get("id") or f"sess_{uuid4().hex[:16]}")
 
     return TupleSecretResult(
         session_id=session_id,
@@ -333,18 +338,30 @@ class VoiceSessionService:
         modalities = self._settings.realtime_modalities
 
         upstream_payload: Dict[str, Any] = {
-            "model": model,
-            "modalities": modalities,
-            "voice": resolved_voice,
-            "instructions": instructions,
-            "input_audio_transcription": None,
-            "turn_detection": {
-                "type": "server_vad",
-                "threshold": 0.5,
-                "prefix_padding_ms": 300,
-                "silence_duration_ms": 500,
-                "create_response": True,
-                "interrupt_response": True,
+            "expires_after": {
+                "anchor": "created_at",
+                "seconds": self._settings.openai_realtime_session_ttl_seconds,
+            },
+            "session": {
+                "type": "realtime",
+                "model": model,
+                "instructions": instructions,
+                "audio": {
+                    "input": {
+                        "transcription": None,
+                        "turn_detection": {
+                            "type": "server_vad",
+                            "threshold": 0.5,
+                            "prefix_padding_ms": 300,
+                            "silence_duration_ms": 500,
+                            "create_response": True,
+                            "interrupt_response": True,
+                        },
+                    },
+                    "output": {
+                        "voice": resolved_voice,
+                    },
+                },
             },
         }
 
@@ -366,7 +383,7 @@ class VoiceSessionService:
             access_mode=payload.access_mode,
             model=model,
             voice=resolved_voice,
-            webrtc_url=f"{base_url}/realtime?model={model}",
+            webrtc_url=f"{base_url}/realtime/calls",
             webrtc_calls_url=f"{base_url}/realtime/calls",
             data_channel_label="oai-events",
             client_secret=parsed.secret,
