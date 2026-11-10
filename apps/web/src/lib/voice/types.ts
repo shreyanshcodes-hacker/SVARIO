@@ -8,7 +8,11 @@
  * - Only sanitized event metadata is surfaced to the UI state machine.
  */
 
-import type { VoiceSessionCreateResponseData } from "@/types/platform";
+import type {
+  AgentToolNameType,
+  LanguageCodeType,
+  VoiceSessionCreateResponseData,
+} from "@/types/platform";
 
 export type VoiceSessionState =
   | "idle"
@@ -64,6 +68,7 @@ export type RealtimeServerEventType =
   | "output_audio_buffer.cleared"
   | "conversation.item.created"
   | "conversation.item.truncated"
+  | "response.function_call_arguments.done"
   | "rate_limits.updated"
   | "error";
 
@@ -123,11 +128,22 @@ export interface RealtimeErrorEvent extends RealtimeServerEventBase {
   };
 }
 
+export interface RealtimeFunctionCallArgumentsDoneEvent
+  extends RealtimeServerEventBase {
+  type: "response.function_call_arguments.done";
+  call_id?: string;
+  name?: string;
+  arguments?: string;
+  item_id?: string;
+  response_id?: string;
+}
+
 export type RealtimeServerEvent =
   | RealtimeSessionLifecycleEvent
   | RealtimeInputSpeechEvent
   | RealtimeResponseLifecycleEvent
   | RealtimeAudioOutputEvent
+  | RealtimeFunctionCallArgumentsDoneEvent
   | RealtimeErrorEvent
   | RealtimeServerEventBase;
 
@@ -139,6 +155,21 @@ export interface RealtimeEventTelemetryEntry {
   summary: string;
 }
 
+export interface LastToolExecutionState {
+  callId: string;
+  toolName: AgentToolNameType;
+  status: "succeeded" | "rejected" | "error";
+  summary: string;
+  timestamp: string;
+}
+
+export interface HumanEscalationNoticeState {
+  escalationReference: string;
+  status: string;
+  notificationDelivered: boolean;
+  customerMessageDirective: string;
+}
+
 export interface VoiceClientSnapshot {
   state: VoiceSessionState;
   permissionState: MicrophonePermissionState;
@@ -148,4 +179,7 @@ export interface VoiceClientSnapshot {
   activeResponseId: string | null;
   expiresAtIso: string | null;
   events: RealtimeEventTelemetryEntry[];
+  preferredLanguage?: LanguageCodeType;
+  lastToolExecution?: LastToolExecutionState | null;
+  escalationNotice?: HumanEscalationNoticeState | null;
 }

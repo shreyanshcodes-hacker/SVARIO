@@ -359,3 +359,34 @@ export interface PublicVoiceTokenResponseData {
   expires_at: string;
   ttl_seconds: number;
 }
+
+// --- Stage 4: AI Agent & Conversational Intelligence Types ---
+
+export type AgentToolNameType =
+  | "get_business_profile"
+  | "get_business_hours"
+  | "search_business_knowledge"
+  | "save_conversation_summary"
+  | "request_human_escalation";
+
+export interface VoiceToolExecutionPayload {
+  session_id: string;
+  organization_id: string;
+  business_id?: string;
+  access_mode?: VoiceAccessModeType;
+  public_access_token?: string;
+  call_id: string;
+  tool_name: AgentToolNameType;
+  arguments: Record<string, unknown>;
+}
+
+export interface VoiceToolExecutionResponseData {
+  session_id: string;
+  call_id: string;
+  tool_name: AgentToolNameType;
+  status: "succeeded" | "rejected" | "error";
+  output: Record<string, unknown>;
+  escalation_triggered: boolean;
+  escalation_reference: string | null;
+  detected_language: LanguageCodeType;
+}

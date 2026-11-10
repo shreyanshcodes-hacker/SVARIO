@@ -1,7 +1,7 @@
 # SVARIO — Staged Delivery Plan
 
-**Current Active Milestone:** **STAGE 3 — SHARED BROWSER VOICE INFRASTRUCTURE**  
-**Status:** Complete (Awaiting Approval to Proceed to Stage 4)
+**Current Active Milestone:** **STAGE 4 — AI AGENT & CONVERSATIONAL INTELLIGENCE**  
+**Status:** Complete (Awaiting Approval to Proceed to Stage 5)
 
 ---
 
@@ -22,15 +22,18 @@
 
 ---
 
-### Stage 3 — Shared Browser Voice Infrastructure (Current Milestone — Complete)
-- **Objective:** Implement shared browser WebRTC voice infrastructure powered by the OpenAI Realtime API across Salons, Clinics, and Hospitals.
+### Stage 3 — Shared Browser Voice Infrastructure (Completed & Approved)
+- Implemented shared browser WebRTC voice infrastructure powered by OpenAI Realtime API (`POST /v1/realtime/client_secrets` with `gpt-realtime`), `POST /api/v1/voice/sessions`, `SvarioWebRtcVoiceClient` with a 10-state machine, and `/voice-test`.
+
+---
+
+### Stage 4 — AI Agent & Conversational Intelligence (Current Milestone — Complete)
+- **Objective:** Implement modular multi-industry AI agent intelligence, typed intent classification, grounded business knowledge retrieval, session-scoped context, controlled backend tool execution, human escalation workflows, and multilingual support (`en`, `hi`, `hinglish`).
 - **Completed Deliverables:**
-  - **Phase 3A — OpenAI Realtime Configuration (`apps/api/app/core/config.py`):** Configurable `OPENAI_API_KEY` (backend-only), `OPENAI_REALTIME_MODEL`, `OPENAI_REALTIME_VOICE`, `OPENAI_REALTIME_SESSION_TTL_SECONDS`, `OPENAI_REALTIME_MODALITIES`, and `VOICE_SESSION_RATE_LIMIT_PER_MINUTE`.
-  - **Phase 3B — Secure Session Creation (`POST /api/v1/voice/sessions`):** Strict access validation (`organization_member` JWT RBAC or deliberate signed `public_visitor` token), server-authoritative instruction assembly, sliding-window rate limiting, and short-lived ephemeral credential minting.
-  - **Phase 3C & 3D — WebRTC Client & 10-State Machine (`apps/web/src/lib/voice/`):** `SvarioWebRtcVoiceClient` managing `getUserMedia`, `RTCPeerConnection`, remote `<audio>` playback, `oai-events` data channel, barge-in interruption, mute/unmute, session expiration, reconnection without leaks, and tab cleanup across all 10 states (`idle`, `requesting_permission`, `connecting`, `connected`, `listening`, `processing`, `speaking`, `reconnecting`, `error`, `ended`).
-  - **Phase 3E — Voice UI & Dedicated Voice-Test Page (`/voice-test`):** `VoiceOrbWaveform`, `VoiceSessionPanel`, and `/voice-test` page using the official Svario palette (`#0B1020`, `#171D33`, `#7657F6`, `#36C6D3`, `#F5F7FC`, `#A7B0C4`).
-  - **Phase 3F & 3G — Typed Event Layer & Industry Compatibility:** Typed `oai-events` handling with zero raw audio or transcript storage by default, supporting `salon`, `clinic`, and `hospital` organizations with mandatory administrative-only healthcare guardrails.
-- **Explicitly Excluded from Stage 3:**
-  - Appointment booking, cancellation, or rescheduling (`Stage 4+`)
-  - Industry-specific database catalogs or workflows (salon service menus, clinic doctor schedules, hospital department directories) (`Stage 4+`)
-  - Persistent call transcripts or raw audio recording (`Stage 4+`)
+  - **Phase 4A & 4B — Modular Agent Architecture & Industry Instructions (`apps/api/app/agents/`):** `BaseIndustryAgent`, `SalonAgent`, `ClinicAgent`, `HospitalAgent`, and `build_stage4_agent_instructions`.
+  - **Phase 4C — Typed Intent Recognition (`intent.py` & `schemas.py`):** 14 typed intents (`greeting`, `business_information`, `opening_hours`, `location`, `services_enquiry`, `pricing_enquiry`, `speciality_enquiry`, `department_enquiry`, `booking_intent`, `rescheduling_intent`, `cancellation_intent`, `human_support`, `emergency_intent`, `unknown`) + `SafetyFlag` detection.
+  - **Phase 4D, 4E & 4F — Grounded Knowledge Retrieval, Session Context & 5 Structured Tools (`tools/` & `context.py`):** `get_business_profile`, `get_business_hours`, `search_business_knowledge`, `save_conversation_summary`, and `request_human_escalation`, backed by `conversation_summaries` and `escalation_requests` with forced RLS on Supabase.
+  - **Phase 4G, 4H & 4I — Controlled Orchestrator, Human Escalation & Realtime Voice Integration (`orchestrator.py`, `routes/voice.py`, `webrtcClient.ts`):** `POST /api/v1/voice/tools/execute`, `POST /api/v1/agent/turns`, `GET /api/v1/voice/sessions/{session_id}/context`, and automatic `response.function_call_arguments.done` -> `conversation.item.create` + `response.create` handling over `oai-events`.
+  - **Phase 4J & 4K — Multilingual Support (`en`, `hi`, `hinglish`) & Reproducible Multi-Industry AI Evaluation Suite (`tests/test_stage4_agent.py` & `stage4-agent-voice.test.tsx`).**
+- **Explicitly Excluded from Stage 4:**
+  - Live appointment booking, rescheduling, or cancellation execution (`Stage 5+`)

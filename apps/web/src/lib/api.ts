@@ -24,6 +24,8 @@ import type {
   VerifiedBackendUser,
   VoiceSessionCreatePayload,
   VoiceSessionCreateResponseData,
+  VoiceToolExecutionPayload,
+  VoiceToolExecutionResponseData,
   WeekdayHoursItemData,
 } from "@/types/platform";
 
@@ -482,4 +484,29 @@ export async function createPublicVoiceTokenApi(
   }
 
   return (await response.json()) as PublicVoiceTokenResponseData;
+}
+
+export async function executeVoiceToolApi(
+  payload: VoiceToolExecutionPayload,
+  accessToken?: string | null
+): Promise<VoiceToolExecutionResponseData> {
+  const headers: HeadersInit = accessToken
+    ? buildAuthHeaders(accessToken)
+    : {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      };
+
+  const response = await fetch(`${getApiBaseUrl()}/api/v1/voice/tools/execute`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseApiError(response));
+  }
+
+  return (await response.json()) as VoiceToolExecutionResponseData;
 }

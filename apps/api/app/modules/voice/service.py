@@ -19,12 +19,24 @@ from typing import Any, Callable, Coroutine, Dict, Optional
 from uuid import UUID, uuid4
 import httpx
 from fastapi import Depends, HTTPException, status
+from app.agents.context import ConversationContextManager
+from app.agents.instructions import (
+    build_realtime_tool_definitions,
+    build_stage4_agent_instructions,
+)
+from app.agents.orchestrator import AgentOrchestrator, get_agent_orchestrator
+from app.agents.schemas import (
+    AgentTurnRequest,
+    AgentTurnResponse,
+    SessionConversationContext,
+    VoiceToolExecutionRequest,
+    VoiceToolExecutionResponse,
+)
 from app.core.auth import AuthenticatedUser
 from app.core.config import Settings, get_settings
 from app.modules.onboarding.schemas import OnboardingBundleResponse
 from app.modules.onboarding.service import OnboardingService, get_onboarding_service
 from app.modules.organizations.schemas import OrganizationIndustry, OrganizationRole
-from app.modules.voice.prompts import build_safe_realtime_instructions
 from app.modules.voice.public_access import (
     PublicVoicePolicyRegistry,
     get_public_voice_policy_registry,
@@ -175,7 +187,7 @@ class TupleSecretResult:
 
 
 class VoiceSessionService:
-    """Orchestrates Stage 3 secure Realtime session creation and public access tokens."""
+    """Orchestrates Stage 3 & Stage 4 Realtime session creation, public tokens, and tool execution."""
 
     def __init__(
         self,
@@ -184,12 +196,17 @@ class VoiceSessionService:
         rate_limiter: VoiceSessionRateLimiter,
         public_registry: PublicVoicePolicyRegistry,
         upstream_mint: RealtimeUpstreamCallable = _default_openai_realtime_mint,
+        orchestrator: Optional[AgentOrchestrator] = None,
     ) -> None:
         self._settings = settings
         self._onboarding_service = onboarding_service
         self._rate_limiter = rate_limiter
         self._public_registry = public_registry
         self._upstream_mint = upstream_mint
+        self._orchestrator = orchestrator or AgentOrchestrator(
+            context_manager=ConversationContextManager(),
+            rate_limiter=rate_limiter,
+        )
 
     async def mint_public_access_token(
         self,
@@ -327,8 +344,9 @@ class VoiceSessionService:
                 ),
             )
 
-        # 4. Build safe server-side instructions & session configuration
-        instructions = build_safe_realtime_instructions(bundle)
+        # 4. Build safe server-side Stage 4 agent instructions & tool definitions
+        instructions = build_stage4_agent_instructions(bundle)
+        tools = build_realtime_tool_definitions()
         resolved_voice = (
             payload.voice_override.value
             if payload.voice_override is not None
@@ -346,6 +364,8 @@ class VoiceSessionService:
                 "type": "realtime",
                 "model": model,
                 "instructions": instructions,
+                "tools": tools,
+                "tool_choice": "auto",
                 "audio": {
                     "input": {
                         "transcription": None,
@@ -368,6 +388,15 @@ class VoiceSessionService:
         # 5. Request short-lived ephemeral credential from OpenAI
         upstream_response = await self._upstream_mint(self._settings, upstream_payload)
         parsed = _extract_ephemeral_secret(upstream_response, self._settings)
+
+        # 6. Initialize session-scoped conversation context (Phase 4E)
+        self._orchestrator.context_manager.initialize_session(
+            session_id=parsed.session_id,
+            organization_id=bundle.organization.id,
+            business_id=bundle.business_id,
+            industry=bundle.organization.industry,
+            initial_language=bundle.languages.primary_language,
+        )
 
         is_healthcare = bundle.organization.industry in {
             OrganizationIndustry.CLINIC,
@@ -410,12 +439,92 @@ class VoiceSessionService:
             ),
         )
 
+    async def execute_voice_tool(
+        self,
+        *,
+        actor: Optional[AuthenticatedUser],
+        client_ip: str,
+        payload: VoiceToolExecutionRequest,
+    ) -> VoiceToolExecutionResponse:
+        """Authorize caller, validate tool parameters, and execute a Stage 4 agent tool."""
+        auth_req = VoiceSessionCreateRequest(
+            organization_id=payload.organization_id,
+            business_id=payload.business_id,
+            access_mode=payload.access_mode,
+            public_access_token=payload.public_access_token,
+        )
+        bundle = await self._resolve_authorized_bundle(actor=actor, payload=auth_req)
+        rate_key = (
+            f"member:{actor.id}"
+            if actor is not None
+            else f"visitor:{client_ip}:{bundle.business_id}"
+        )
+        return await self._orchestrator.execute_realtime_tool(
+            bundle=bundle,
+            session_id=payload.session_id,
+            call_id=payload.call_id,
+            tool_name=payload.tool_name,
+            arguments=payload.arguments,
+            actor_user_id=actor.id if actor is not None else None,
+            rate_limit_key=rate_key,
+            max_requests_per_minute=self._settings.voice_session_rate_limit_per_minute * 3,
+        )
+
+    async def process_agent_turn(
+        self,
+        *,
+        actor: Optional[AuthenticatedUser],
+        client_ip: str,
+        payload: AgentTurnRequest,
+    ) -> AgentTurnResponse:
+        """Execute a full controlled Stage 4 conversational turn (`POST /api/v1/agent/turns`)."""
+        auth_req = VoiceSessionCreateRequest(
+            organization_id=payload.organization_id,
+            business_id=payload.business_id,
+            access_mode=payload.access_mode,
+            public_access_token=payload.public_access_token,
+        )
+        bundle = await self._resolve_authorized_bundle(actor=actor, payload=auth_req)
+        rate_key = (
+            f"member:{actor.id}"
+            if actor is not None
+            else f"visitor:{client_ip}:{bundle.business_id}"
+        )
+        return await self._orchestrator.process_turn(
+            bundle=bundle,
+            session_id=payload.session_id,
+            user_input=payload.user_input,
+            preferred_language=payload.preferred_language,
+            actor_user_id=actor.id if actor is not None else None,
+            rate_limit_key=rate_key,
+        )
+
+    async def get_session_context(
+        self,
+        *,
+        actor: AuthenticatedUser,
+        session_id: str,
+        organization_id: UUID,
+    ) -> SessionConversationContext:
+        """Return session-scoped conversation context for an authorized organization member."""
+        bundle = await self._onboarding_service.get_onboarding_bundle(
+            actor=actor, organization_id=organization_id
+        )
+        return self._orchestrator.context_manager.get_or_create_context(
+            session_id=session_id,
+            organization_id=bundle.organization.id,
+            business_id=bundle.business_id,
+            industry=bundle.organization.industry,
+            initial_language=bundle.languages.primary_language,
+        )
+
 
 def get_voice_session_service(
     settings: Settings = Depends(get_settings),
     onboarding_service: OnboardingService = Depends(get_onboarding_service),
     rate_limiter: VoiceSessionRateLimiter = Depends(get_voice_rate_limiter),
     public_registry: PublicVoicePolicyRegistry = Depends(get_public_voice_policy_registry),
+    orchestrator: AgentOrchestrator = Depends(get_agent_orchestrator),
 ) -> VoiceSessionService:
     """FastAPI dependency returning a configured VoiceSessionService."""
     return VoiceSessionService(
@@ -423,4 +532,5 @@ def get_voice_session_service(
         onboarding_service=onboarding_service,
         rate_limiter=rate_limiter,
         public_registry=public_registry,
+        orchestrator=orchestrator,
     )

@@ -13,12 +13,18 @@
  * 8. Session expiration timer, reconnection without resource leaks, and tab cleanup
  */
 
-import { createVoiceSessionApi } from "@/lib/api";
+import { createVoiceSessionApi, executeVoiceToolApi } from "@/lib/api";
 import type {
+  AgentToolNameType,
+  LanguageCodeType,
   VoiceSessionCreatePayload,
   VoiceSessionCreateResponseData,
+  VoiceToolExecutionPayload,
+  VoiceToolExecutionResponseData,
 } from "@/types/platform";
 import type {
+  HumanEscalationNoticeState,
+  LastToolExecutionState,
   MicrophonePermissionState,
   RealtimeEventTelemetryEntry,
   RealtimeServerEvent,
@@ -46,6 +52,10 @@ export interface WebRtcEnvironmentAdapters {
     ephemeralToken: string,
     sdpOffer: string
   ) => Promise<string>;
+  executeVoiceTool?: (
+    payload: VoiceToolExecutionPayload,
+    accessToken?: string | null
+  ) => Promise<VoiceToolExecutionResponseData>;
 }
 
 const MAX_TELEMETRY_EVENTS = 40;
@@ -127,6 +137,9 @@ export class SvarioWebRtcVoiceClient {
   private activeResponseId: string | null = null;
   private expiresAtIso: string | null = null;
   private events: RealtimeEventTelemetryEntry[] = [];
+  private preferredLanguage: LanguageCodeType = "en";
+  private lastToolExecution: LastToolExecutionState | null = null;
+  private escalationNotice: HumanEscalationNoticeState | null = null;
 
   private peerConnection: RTCPeerConnection | null = null;
   private dataChannel: RTCDataChannel | null = null;
@@ -168,6 +181,9 @@ export class SvarioWebRtcVoiceClient {
       activeResponseId: this.activeResponseId,
       expiresAtIso: this.expiresAtIso,
       events: [...this.events],
+      preferredLanguage: this.preferredLanguage,
+      lastToolExecution: this.lastToolExecution,
+      escalationNotice: this.escalationNotice,
     };
   }
 
@@ -217,6 +233,8 @@ export class SvarioWebRtcVoiceClient {
     this.error = null;
     this.isMuted = false;
     this.activeResponseId = null;
+    this.lastToolExecution = null;
+    this.escalationNotice = null;
 
     this.state = isReconnect ? "reconnecting" : "requesting_permission";
     this.permissionState = "requesting";
@@ -300,6 +318,9 @@ export class SvarioWebRtcVoiceClient {
       sessionData = await createSessionFn(payload, accessToken);
       this.activeSession = sessionData;
       this.expiresAtIso = sessionData.client_secret.expires_at;
+      if (sessionData.assistant_context.primary_language) {
+        this.preferredLanguage = sessionData.assistant_context.primary_language;
+      }
     } catch (err: unknown) {
       const msg =
         err instanceof Error
@@ -484,6 +505,47 @@ export class SvarioWebRtcVoiceClient {
   }
 
   /**
+   * Update preferred conversation language (`en`, `hi`, or `hinglish`) for the active session.
+   */
+  public setPreferredLanguage(language: LanguageCodeType): void {
+    this.preferredLanguage = language;
+    this.appendTelemetry(
+      "lifecycle",
+      "language.selected",
+      `Preferred conversation language set to ${language.toUpperCase()}.`
+    );
+
+    if (this.dataChannel && this.dataChannel.readyState === "open") {
+      const langLabel =
+        language === "hi"
+          ? "Hindi (hi)"
+          : language === "hinglish"
+          ? "Hinglish (conversational Hindi-English mix)"
+          : "English (en)";
+      try {
+        this.dataChannel.send(
+          JSON.stringify({
+            type: "conversation.item.create",
+            item: {
+              type: "message",
+              role: "user",
+              content: [
+                {
+                  type: "input_text",
+                  text: `[Language Preference Updated: Please respond in ${langLabel} while keeping all safety and tool-calling rules intact.]`,
+                },
+              ],
+            },
+          })
+        );
+      } catch {
+        // Ignore transient data channel send errors
+      }
+    }
+    this.emitSnapshot();
+  }
+
+  /**
    * End the current voice session and release all WebRTC & microphone resources.
    */
   public endSession(): void {
@@ -492,6 +554,8 @@ export class SvarioWebRtcVoiceClient {
     this.activeSession = null;
     this.activeResponseId = null;
     this.expiresAtIso = null;
+    this.lastToolExecution = null;
+    this.escalationNotice = null;
     this.appendTelemetry(
       "lifecycle",
       "session.ended",
@@ -632,6 +696,34 @@ export class SvarioWebRtcVoiceClient {
         break;
       }
 
+      case "response.function_call_arguments.done": {
+        const callId =
+          "call_id" in parsed && typeof parsed.call_id === "string"
+            ? parsed.call_id
+            : `call_${Date.now()}`;
+        const toolNameRaw =
+          "name" in parsed && typeof parsed.name === "string"
+            ? parsed.name
+            : "";
+        const rawArguments =
+          "arguments" in parsed && typeof parsed.arguments === "string"
+            ? parsed.arguments
+            : "{}";
+
+        this.state = "processing";
+        this.appendTelemetry(
+          "inbound",
+          parsed.type,
+          `Realtime agent requested tool '${toolNameRaw}' (${callId}).`
+        );
+        void this.executeFunctionCallAndRespond(
+          callId,
+          toolNameRaw as AgentToolNameType,
+          rawArguments
+        );
+        break;
+      }
+
       case "error": {
         const errMessage =
           "error" in parsed && parsed.error?.message
@@ -649,6 +741,133 @@ export class SvarioWebRtcVoiceClient {
     }
 
     this.callbacks.onRealtimeEvent?.(parsed);
+    this.emitSnapshot();
+  }
+
+  private async executeFunctionCallAndRespond(
+    callId: string,
+    toolName: AgentToolNameType,
+    rawArguments: string
+  ): Promise<void> {
+    if (!this.activeSession) {
+      return;
+    }
+
+    let parsedArgs: Record<string, unknown> = {};
+    try {
+      const candidate = JSON.parse(rawArguments || "{}") as unknown;
+      if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+        parsedArgs = candidate as Record<string, unknown>;
+      }
+    } catch {
+      parsedArgs = {};
+    }
+
+    const executeToolFn =
+      this.adapters.executeVoiceTool ?? executeVoiceToolApi;
+    const accessToken = this.lastConnectArgs?.accessToken ?? null;
+    const publicAccessToken = this.lastConnectArgs?.payload.public_access_token;
+
+    let toolOutputPayload: Record<string, unknown>;
+
+    try {
+      const result = await executeToolFn(
+        {
+          session_id: this.activeSession.session_id,
+          organization_id: this.activeSession.organization_id,
+          business_id: this.activeSession.business_id,
+          access_mode: this.activeSession.access_mode,
+          public_access_token: publicAccessToken,
+          call_id: callId,
+          tool_name: toolName,
+          arguments: parsedArgs,
+        },
+        accessToken
+      );
+
+      toolOutputPayload = result.output;
+      this.lastToolExecution = {
+        callId,
+        toolName: result.tool_name,
+        status: result.status,
+        summary:
+          result.status === "succeeded"
+            ? `Validated & executed ${result.tool_name}`
+            : `Tool ${result.tool_name} ${result.status}`,
+        timestamp: new Date().toISOString(),
+      };
+
+      if (result.escalation_triggered && result.escalation_reference) {
+        const out = result.output;
+        this.escalationNotice = {
+          escalationReference: result.escalation_reference,
+          status:
+            typeof out.status === "string"
+              ? out.status
+              : "pending_human_review",
+          notificationDelivered: Boolean(out.notification_delivered),
+          customerMessageDirective:
+            typeof out.customer_message_directive === "string"
+              ? out.customer_message_directive
+              : "Escalation request logged for staff review (no automatic live staff notification delivered).",
+        };
+      }
+
+      this.appendTelemetry(
+        "lifecycle",
+        `tool.${result.status}`,
+        `Backend tool '${result.tool_name}' completed (${result.status}).`
+      );
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Backend tool execution failed.";
+      toolOutputPayload = {
+        error: "tool_execution_failed",
+        message: `${message} Do not claim the action succeeded.`,
+      };
+      this.lastToolExecution = {
+        callId,
+        toolName,
+        status: "error",
+        summary: `Tool ${toolName} failed: ${message}`,
+        timestamp: new Date().toISOString(),
+      };
+      this.appendTelemetry(
+        "lifecycle",
+        "tool.error",
+        `Tool '${toolName}' failed on backend.`
+      );
+    }
+
+    if (this.dataChannel && this.dataChannel.readyState === "open") {
+      try {
+        this.dataChannel.send(
+          JSON.stringify({
+            type: "conversation.item.create",
+            item: {
+              type: "function_call_output",
+              call_id: callId,
+              output: JSON.stringify(toolOutputPayload),
+            },
+          })
+        );
+        this.dataChannel.send(
+          JSON.stringify({
+            type: "response.create",
+          })
+        );
+        this.appendTelemetry(
+          "outbound",
+          "conversation.item.create",
+          `Returned validated tool output for '${toolName}' (${callId}) to Realtime session.`
+        );
+      } catch {
+        // Ignore data channel send errors
+      }
+    }
+
     this.emitSnapshot();
   }
 

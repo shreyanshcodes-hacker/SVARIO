@@ -8,6 +8,7 @@ import {
 } from "@/lib/voice/webrtcClient";
 import type { VoiceClientSnapshot } from "@/lib/voice/types";
 import type {
+  LanguageCodeType,
   OrganizationSummary,
   RealtimeVoicePresetType,
 } from "@/types/platform";
@@ -29,6 +30,12 @@ const VOICE_PRESETS: readonly { id: RealtimeVoicePresetType; label: string }[] =
   { id: "ash", label: "Ash (Direct)" },
 ];
 
+const LANGUAGE_OPTIONS: readonly { id: LanguageCodeType; label: string }[] = [
+  { id: "en", label: "English (EN)" },
+  { id: "hi", label: "Hindi (HI / हिन्दी)" },
+  { id: "hinglish", label: "Hinglish (Conversational)" },
+];
+
 const INITIAL_SNAPSHOT: VoiceClientSnapshot = {
   state: "idle",
   permissionState: "prompt",
@@ -38,6 +45,9 @@ const INITIAL_SNAPSHOT: VoiceClientSnapshot = {
   activeResponseId: null,
   expiresAtIso: null,
   events: [],
+  preferredLanguage: "en",
+  lastToolExecution: null,
+  escalationNotice: null,
 };
 
 export function VoiceSessionPanel({
@@ -125,6 +135,10 @@ export function VoiceSessionPanel({
     clientRef.current?.interruptResponse();
   }, []);
 
+  const handleSelectLanguage = useCallback((lang: LanguageCodeType) => {
+    clientRef.current?.setPreferredLanguage(lang);
+  }, []);
+
   return (
     <div className="space-y-6 rounded-2xl border border-white/10 bg-[#171D33] p-6 text-[#F5F7FC] shadow-xl">
       {/* Top Header & Selector Row */}
@@ -179,6 +193,27 @@ export function VoiceSessionPanel({
               {VOICE_PRESETS.map((preset) => (
                 <option key={preset.id} value={preset.id}>
                   {preset.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex flex-col text-xs text-[#A7B0C4]">
+            <span className="mb-1 font-medium uppercase tracking-wider">
+              Language
+            </span>
+            <select
+              aria-label="Select conversation language"
+              data-testid="voice-language-select"
+              value={snapshot.preferredLanguage ?? "en"}
+              onChange={(e) =>
+                handleSelectLanguage(e.target.value as LanguageCodeType)
+              }
+              className="rounded-lg border border-white/15 bg-[#0B1020] px-3 py-2 text-xs text-[#F5F7FC] focus:border-[#7657F6] focus:outline-none"
+            >
+              {LANGUAGE_OPTIONS.map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.label}
                 </option>
               ))}
             </select>
@@ -277,6 +312,43 @@ export function VoiceSessionPanel({
 
       {/* Central Orb & Waveform */}
       <VoiceOrbWaveform state={snapshot.state} isMuted={snapshot.isMuted} />
+
+      {/* Stage 4 Validated Tool Execution & Human Escalation Status Banners */}
+      {snapshot.lastToolExecution && (
+        <div
+          data-testid="last-tool-execution-badge"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#36C6D3]/30 bg-[#0B1020]/90 px-4 py-2.5 text-xs"
+        >
+          <span className="font-semibold text-[#36C6D3]">
+            Stage 4 Agent Tool Executed:{" "}
+            <code className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[#F5F7FC]">
+              {snapshot.lastToolExecution.toolName}
+            </code>
+          </span>
+          <span className="text-[#A7B0C4]">
+            Status:{" "}
+            <strong className="uppercase text-[#F5F7FC]">
+              {snapshot.lastToolExecution.status}
+            </strong>
+          </span>
+        </div>
+      )}
+
+      {snapshot.escalationNotice && (
+        <div
+          role="status"
+          data-testid="human-escalation-banner"
+          className="rounded-xl border border-amber-400/40 bg-amber-950/30 p-4 text-xs text-amber-100"
+        >
+          <p className="font-semibold text-amber-200">
+            Human Escalation Logged ({snapshot.escalationNotice.escalationReference}) —{" "}
+            <span className="uppercase">{snapshot.escalationNotice.status}</span>
+          </p>
+          <p className="mt-1 text-amber-100/90">
+            {snapshot.escalationNotice.customerMessageDirective}
+          </p>
+        </div>
+      )}
 
       {/* Error Display Banner */}
       {snapshot.error && (
