@@ -26,7 +26,7 @@ RUN npm ci --include=dev
 COPY apps/web /app/apps/web
 
 ARG NEXT_PUBLIC_APP_NAME=SVARIO
-ARG NEXT_PUBLIC_APP_STAGE=2
+ARG NEXT_PUBLIC_APP_STAGE=4
 ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 ARG NEXT_PUBLIC_SITE_URL=http://localhost:3000
 ARG NEXT_PUBLIC_SUPABASE_URL=https://pxijyektjscrltwpvzua.supabase.co

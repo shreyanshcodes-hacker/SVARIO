@@ -14,6 +14,8 @@ Security & Architecture Guarantees:
 6. Never returns or logs the permanent `OPENAI_API_KEY` or raw session secrets.
 """
 
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Coroutine, Dict, Optional
 from uuid import UUID, uuid4
@@ -106,6 +108,14 @@ async def _default_openai_realtime_mint(
     return data
 
 
+class TupleSecretResult:
+    """Internal container for parsed session ID and ephemeral credential."""
+
+    def __init__(self, session_id: str, secret: EphemeralClientSecret) -> None:
+        self.session_id = session_id
+        self.secret = secret
+
+
 def _extract_ephemeral_secret(
     upstream_data: Dict[str, Any],
     settings: Settings,
@@ -176,14 +186,6 @@ def _extract_ephemeral_secret(
             ttl_seconds=ttl_seconds,
         ),
     )
-
-
-class TupleSecretResult:
-    """Internal container for parsed session ID and ephemeral credential."""
-
-    def __init__(self, session_id: str, secret: EphemeralClientSecret) -> None:
-        self.session_id = session_id
-        self.secret = secret
 
 
 class VoiceSessionService:

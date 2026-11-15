@@ -32,7 +32,18 @@ import type {
 export function getApiBaseUrl(): string {
   const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
   if (configured && configured.length > 0) {
-    return configured.replace(/\/+$/, "");
+    const cleanUrl = configured.replace(/\/+$/, "");
+    if (
+      typeof window !== "undefined" &&
+      window.location.port === "3001" &&
+      cleanUrl.includes(":8000")
+    ) {
+      return cleanUrl.replace(":8000", ":8001");
+    }
+    return cleanUrl;
+  }
+  if (typeof window !== "undefined" && window.location.port === "3001") {
+    return "http://localhost:8001";
   }
   return "http://localhost:8000";
 }
