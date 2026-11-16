@@ -778,3 +778,319 @@ export async function cancelSalonAppointment(
   if (!response.ok) throw new Error(await parseApiError(response));
   return (await response.json()) as SalonAppointment;
 }
+
+// ============================================================================
+// Stage 6 Clinic Workflow Client APIs
+// ============================================================================
+
+import type {
+  ClinicAppointment,
+  ClinicAvailabilityResponse,
+  ClinicConsultationType,
+  ClinicDepartment,
+  ClinicDoctor,
+  ClinicSpeciality,
+  ConsultationMode,
+  DoctorWorkingHours,
+} from "@/types/clinic";
+
+function clinicBase(organizationId: string, businessId: string): string {
+  return `${getApiBaseUrl()}/api/v1/organizations/${encodeURIComponent(organizationId)}/clinics/${encodeURIComponent(businessId)}`;
+}
+
+export async function fetchClinicDepartments(
+  accessToken: string,
+  organizationId: string,
+  businessId: string
+): Promise<ClinicDepartment[]> {
+  const res = await fetch(`${clinicBase(organizationId, businessId)}/departments`, {
+    headers: buildAuthHeaders(accessToken),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as ClinicDepartment[];
+}
+
+export async function createClinicDepartment(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  payload: { name: string; description?: string | null; is_active?: boolean }
+): Promise<ClinicDepartment> {
+  const res = await fetch(`${clinicBase(organizationId, businessId)}/departments`, {
+    method: "POST",
+    headers: buildAuthHeaders(accessToken),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as ClinicDepartment;
+}
+
+export async function updateClinicDepartment(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  departmentId: string,
+  payload: { name?: string; description?: string | null; is_active?: boolean }
+): Promise<ClinicDepartment> {
+  const res = await fetch(
+    `${clinicBase(organizationId, businessId)}/departments/${encodeURIComponent(departmentId)}`,
+    {
+      method: "PATCH",
+      headers: buildAuthHeaders(accessToken),
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as ClinicDepartment;
+}
+
+export async function fetchClinicSpecialities(
+  accessToken: string,
+  organizationId: string,
+  businessId: string
+): Promise<ClinicSpeciality[]> {
+  const res = await fetch(`${clinicBase(organizationId, businessId)}/specialities`, {
+    headers: buildAuthHeaders(accessToken),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as ClinicSpeciality[];
+}
+
+export async function createClinicSpeciality(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  payload: { name: string; description?: string | null; is_active?: boolean }
+): Promise<ClinicSpeciality> {
+  const res = await fetch(`${clinicBase(organizationId, businessId)}/specialities`, {
+    method: "POST",
+    headers: buildAuthHeaders(accessToken),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as ClinicSpeciality;
+}
+
+export async function fetchClinicConsultationTypes(
+  accessToken: string,
+  organizationId: string,
+  businessId: string
+): Promise<ClinicConsultationType[]> {
+  const res = await fetch(`${clinicBase(organizationId, businessId)}/consultation-types`, {
+    headers: buildAuthHeaders(accessToken),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as ClinicConsultationType[];
+}
+
+export async function createClinicConsultationType(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  payload: {
+    name: string;
+    description?: string | null;
+    duration_minutes: number;
+    consultation_mode: ConsultationMode;
+    fee_amount?: number | null;
+    currency_code?: string | null;
+    is_active?: boolean;
+  }
+): Promise<ClinicConsultationType> {
+  const res = await fetch(`${clinicBase(organizationId, businessId)}/consultation-types`, {
+    method: "POST",
+    headers: buildAuthHeaders(accessToken),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as ClinicConsultationType;
+}
+
+export async function fetchClinicDoctors(
+  accessToken: string,
+  organizationId: string,
+  businessId: string
+): Promise<ClinicDoctor[]> {
+  const res = await fetch(`${clinicBase(organizationId, businessId)}/doctors`, {
+    headers: buildAuthHeaders(accessToken),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as ClinicDoctor[];
+}
+
+export async function createClinicDoctor(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  payload: {
+    display_name: string;
+    professional_title?: string | null;
+    public_bio?: string | null;
+    languages?: string[];
+    department_ids?: string[];
+    speciality_ids?: string[];
+    consultation_type_ids?: string[];
+  }
+): Promise<ClinicDoctor> {
+  const res = await fetch(`${clinicBase(organizationId, businessId)}/doctors`, {
+    method: "POST",
+    headers: buildAuthHeaders(accessToken),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as ClinicDoctor;
+}
+
+export async function updateClinicDoctor(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  doctorId: string,
+  payload: { display_name?: string; professional_title?: string | null; is_active?: boolean }
+): Promise<ClinicDoctor> {
+  const res = await fetch(
+    `${clinicBase(organizationId, businessId)}/doctors/${encodeURIComponent(doctorId)}`,
+    {
+      method: "PATCH",
+      headers: buildAuthHeaders(accessToken),
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as ClinicDoctor;
+}
+
+export async function upsertClinicDoctorWorkingHours(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  doctorId: string,
+  items: Array<{
+    day_of_week: number;
+    start_time: string | null;
+    end_time: string | null;
+    is_active: boolean;
+  }>
+): Promise<DoctorWorkingHours[]> {
+  const res = await fetch(
+    `${clinicBase(organizationId, businessId)}/doctors/${encodeURIComponent(doctorId)}/working-hours`,
+    {
+      method: "PUT",
+      headers: buildAuthHeaders(accessToken),
+      body: JSON.stringify({ items }),
+    }
+  );
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as DoctorWorkingHours[];
+}
+
+export async function fetchClinicAvailability(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  params: {
+    consultation_type_id: string;
+    target_date: string;
+    doctor_id?: string;
+    department_id?: string;
+  }
+): Promise<ClinicAvailabilityResponse> {
+  const q = new URLSearchParams({
+    consultation_type_id: params.consultation_type_id,
+    target_date: params.target_date,
+  });
+  if (params.doctor_id) q.set("doctor_id", params.doctor_id);
+  if (params.department_id) q.set("department_id", params.department_id);
+  const res = await fetch(
+    `${clinicBase(organizationId, businessId)}/availability?${q.toString()}`,
+    {
+      headers: buildAuthHeaders(accessToken),
+      cache: "no-store",
+    }
+  );
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as ClinicAvailabilityResponse;
+}
+
+export async function fetchClinicAppointments(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  params?: { doctor_id?: string; target_date?: string }
+): Promise<ClinicAppointment[]> {
+  const q = new URLSearchParams();
+  if (params?.doctor_id) q.set("doctor_id", params.doctor_id);
+  if (params?.target_date) q.set("target_date", params.target_date);
+  const qs = q.toString() ? `?${q.toString()}` : "";
+  const res = await fetch(`${clinicBase(organizationId, businessId)}/appointments${qs}`, {
+    headers: buildAuthHeaders(accessToken),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as ClinicAppointment[];
+}
+
+export async function createClinicAppointment(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  payload: {
+    doctor_id: string;
+    consultation_type_id: string;
+    department_id?: string | null;
+    patient_display_name: string;
+    patient_contact: string;
+    starts_at: string;
+    idempotency_key?: string;
+  }
+): Promise<ClinicAppointment> {
+  const res = await fetch(`${clinicBase(organizationId, businessId)}/appointments`, {
+    method: "POST",
+    headers: buildAuthHeaders(accessToken),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as ClinicAppointment;
+}
+
+export async function rescheduleClinicAppointment(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  appointmentId: string,
+  payload: { new_starts_at: string; new_doctor_id?: string | null }
+): Promise<ClinicAppointment> {
+  const res = await fetch(
+    `${clinicBase(organizationId, businessId)}/appointments/${encodeURIComponent(appointmentId)}/reschedule`,
+    {
+      method: "POST",
+      headers: buildAuthHeaders(accessToken),
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as ClinicAppointment;
+}
+
+export async function cancelClinicAppointment(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  appointmentId: string,
+  reason?: string
+): Promise<ClinicAppointment> {
+  const res = await fetch(
+    `${clinicBase(organizationId, businessId)}/appointments/${encodeURIComponent(appointmentId)}/cancel`,
+    {
+      method: "POST",
+      headers: buildAuthHeaders(accessToken),
+      body: JSON.stringify({ reason }),
+    }
+  );
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as ClinicAppointment;
+}

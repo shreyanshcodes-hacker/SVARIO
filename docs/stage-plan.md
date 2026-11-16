@@ -1,7 +1,7 @@
 # SVARIO — Staged Delivery Plan
 
-**Current Active Milestone:** **STAGE 5 — SALON WORKFLOW MODULE**  
-**Status:** Complete (Awaiting Approval to Proceed to Stage 6)
+**Current Active Milestone:** **STAGE 6 — CLINIC WORKFLOW MODULE**  
+**Status:** Complete (Awaiting Approval to Proceed to Stage 7)
 
 ---
 
@@ -46,3 +46,15 @@
   - **I. Verification & Testing:** 55 backend tests (`pytest apps/api/tests -q`), 23 frontend tests (`vitest run`), Next.js 15 production build.
 - **Explicitly Excluded from Stage 5:**
   - Clinic doctor consultation booking or hospital OPD department workflows (`Stage 6+`).
+
+---
+
+### Stage 6 — Clinic Workflow Module (Current Milestone — Complete)
+- **Objective:** Implement a secure, tenant-isolated, AI-enabled Clinic Workflow Module with strict healthcare administrative-only guardrails, zero clinical/diagnostic behavior, and double-booking prevention.
+- **Completed Deliverables:**
+  - **Database & RLS (`20261116000007_stage6_clinic_workflow_and_rls.sql`):** 11 clinic tables (`clinic_departments`, `clinic_doctors`, `clinic_specialities`, `clinic_doctor_departments`, `clinic_doctor_specialities`, `clinic_consultation_types`, `clinic_doctor_consultation_types`, `clinic_doctor_working_hours`, `clinic_doctor_breaks`, `clinic_doctor_unavailability`, `clinic_appointments`) with `btree_gist` exclusion constraint `excl_clinic_appointments_no_doctor_overlap` and `FORCE ROW LEVEL SECURITY`.
+  - **Backend API (`/api/v1/organizations/{organization_id}/clinics/{business_id}/...`):** CRUD for departments, doctors, specialities, consultation types, schedules, dynamic availability, and transactional appointments.
+  - **AI Agent Integration (`ClinicAgent`, `clinic_tools.py`):** 10 clinic tools, patient contact verification for reschedule/cancel, strict non-diagnostic/non-prescriptive directives, and immediate emergency redirection.
+  - **Frontend Dashboard (`ClinicDashboardView.tsx`):** KPI overview, tabbed clinic operations desk, masked patient contact display, and confirmation-gated cancellation.
+- **Explicitly Excluded from Stage 6:**
+  - Hospital OPD/IPD department workflows (`Stage 7`) and unified scheduling engine (`Stage 8`).

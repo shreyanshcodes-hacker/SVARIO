@@ -34,18 +34,29 @@ from app.agents.schemas import (
     VoiceToolExecutionResponse,
 )
 from app.agents.tools import (
+    execute_cancel_clinic_appointment,
     execute_cancel_salon_appointment,
+    execute_check_clinic_availability,
     execute_check_salon_availability,
+    execute_create_clinic_appointment,
     execute_create_salon_appointment,
     execute_get_business_hours,
     execute_get_business_profile,
+    execute_get_clinic_consultation_types,
+    execute_get_clinic_departments,
+    execute_get_clinic_doctors,
+    execute_get_clinic_information,
+    execute_get_clinic_specialities,
     execute_get_salon_services,
     execute_get_salon_staff,
+    execute_request_clinic_human_escalation,
     execute_request_human_escalation,
+    execute_reschedule_clinic_appointment,
     execute_reschedule_salon_appointment,
     execute_save_conversation_summary,
     execute_search_business_knowledge,
 )
+from app.modules.clinics.service import ClinicWorkflowService, get_clinic_workflow_service
 from app.modules.onboarding.schemas import LanguageCode, OnboardingBundleResponse
 from app.modules.organizations.schemas import OrganizationIndustry
 from app.modules.salons.service import SalonWorkflowService, get_salon_workflow_service
@@ -82,6 +93,7 @@ class AgentOrchestrator:
         persist_summaries_enabled: bool = True,
         model_response_generator: Optional[ModelResponseGeneratorCallable] = None,
         salon_service: Optional[SalonWorkflowService] = None,
+        clinic_service: Optional[ClinicWorkflowService] = None,
     ) -> None:
         self._context_manager = context_manager or get_conversation_context_manager()
         self._intent_classifier = intent_classifier or IntentClassifier()
@@ -92,6 +104,7 @@ class AgentOrchestrator:
         self._persist_summaries_enabled = persist_summaries_enabled
         self._model_response_generator = model_response_generator
         self._salon_service = salon_service or get_salon_workflow_service()
+        self._clinic_service = clinic_service or get_clinic_workflow_service()
 
     @property
     def context_manager(self) -> ConversationContextManager:
@@ -102,6 +115,11 @@ class AgentOrchestrator:
     def salon_service(self) -> SalonWorkflowService:
         """Return the salon workflow service bound to this orchestrator."""
         return self._salon_service
+
+    @property
+    def clinic_service(self) -> ClinicWorkflowService:
+        """Return the clinic workflow service bound to this orchestrator."""
+        return self._clinic_service
 
     def _dispatch_tool_sync(
         self,
@@ -213,6 +231,96 @@ class AgentOrchestrator:
                 actor_user_id=actor_user_id,
             )
             return salon_res.model_dump(mode="json")
+
+        # Stage 6 Clinic Workflow Tools
+        if tool_name == AgentToolName.GET_CLINIC_INFORMATION:
+            clinic_res = execute_get_clinic_information(
+                bundle=bundle,
+                raw_arguments=arguments,
+            )
+            return clinic_res.model_dump(mode="json")
+
+        if tool_name == AgentToolName.GET_CLINIC_DEPARTMENTS:
+            clinic_res = execute_get_clinic_departments(
+                bundle=bundle,
+                raw_arguments=arguments,
+                clinic_service=self._clinic_service,
+                actor_user_id=actor_user_id,
+            )
+            return clinic_res.model_dump(mode="json")
+
+        if tool_name == AgentToolName.GET_CLINIC_SPECIALITIES:
+            clinic_res = execute_get_clinic_specialities(
+                bundle=bundle,
+                raw_arguments=arguments,
+                clinic_service=self._clinic_service,
+                actor_user_id=actor_user_id,
+            )
+            return clinic_res.model_dump(mode="json")
+
+        if tool_name == AgentToolName.GET_CLINIC_DOCTORS:
+            clinic_res = execute_get_clinic_doctors(
+                bundle=bundle,
+                raw_arguments=arguments,
+                clinic_service=self._clinic_service,
+                actor_user_id=actor_user_id,
+            )
+            return clinic_res.model_dump(mode="json")
+
+        if tool_name == AgentToolName.GET_CLINIC_CONSULTATION_TYPES:
+            clinic_res = execute_get_clinic_consultation_types(
+                bundle=bundle,
+                raw_arguments=arguments,
+                clinic_service=self._clinic_service,
+                actor_user_id=actor_user_id,
+            )
+            return clinic_res.model_dump(mode="json")
+
+        if tool_name == AgentToolName.CHECK_CLINIC_AVAILABILITY:
+            clinic_res = execute_check_clinic_availability(
+                bundle=bundle,
+                raw_arguments=arguments,
+                clinic_service=self._clinic_service,
+                actor_user_id=actor_user_id,
+            )
+            return clinic_res.model_dump(mode="json")
+
+        if tool_name == AgentToolName.CREATE_CLINIC_APPOINTMENT:
+            clinic_res = execute_create_clinic_appointment(
+                bundle=bundle,
+                raw_arguments=arguments,
+                clinic_service=self._clinic_service,
+                actor_user_id=actor_user_id,
+            )
+            return clinic_res.model_dump(mode="json")
+
+        if tool_name == AgentToolName.RESCHEDULE_CLINIC_APPOINTMENT:
+            clinic_res = execute_reschedule_clinic_appointment(
+                bundle=bundle,
+                raw_arguments=arguments,
+                clinic_service=self._clinic_service,
+                actor_user_id=actor_user_id,
+            )
+            return clinic_res.model_dump(mode="json")
+
+        if tool_name == AgentToolName.CANCEL_CLINIC_APPOINTMENT:
+            clinic_res = execute_cancel_clinic_appointment(
+                bundle=bundle,
+                raw_arguments=arguments,
+                clinic_service=self._clinic_service,
+                actor_user_id=actor_user_id,
+            )
+            return clinic_res.model_dump(mode="json")
+
+        if tool_name == AgentToolName.REQUEST_CLINIC_HUMAN_ESCALATION:
+            clinic_res = execute_request_clinic_human_escalation(
+                bundle=bundle,
+                session_id=session_id,
+                raw_arguments=arguments,
+                context_manager=self._context_manager,
+                actor_user_id=actor_user_id,
+            )
+            return clinic_res.model_dump(mode="json")
 
         raise ValueError(f"Unsupported tool: {tool_name}")
 
@@ -366,6 +474,15 @@ class AgentOrchestrator:
             AgentToolName.GET_BUSINESS_PROFILE,
             AgentToolName.GET_BUSINESS_HOURS,
             AgentToolName.SEARCH_BUSINESS_KNOWLEDGE,
+            AgentToolName.GET_CLINIC_INFORMATION,
+            AgentToolName.GET_CLINIC_DEPARTMENTS,
+            AgentToolName.GET_CLINIC_DOCTORS,
+            AgentToolName.GET_CLINIC_SPECIALITIES,
+            AgentToolName.GET_CLINIC_CONSULTATION_TYPES,
+            AgentToolName.CHECK_CLINIC_AVAILABILITY,
+            AgentToolName.CREATE_CLINIC_APPOINTMENT,
+            AgentToolName.RESCHEDULE_CLINIC_APPOINTMENT,
+            AgentToolName.CANCEL_CLINIC_APPOINTMENT,
         }:
             self._context_manager.record_audit_log(
                 organization_id=bundle.organization.id,
@@ -379,7 +496,11 @@ class AgentOrchestrator:
             )
 
         escalation_triggered = (
-            tool_name == AgentToolName.REQUEST_HUMAN_ESCALATION
+            tool_name
+            in {
+                AgentToolName.REQUEST_HUMAN_ESCALATION,
+                AgentToolName.REQUEST_CLINIC_HUMAN_ESCALATION,
+            }
             and bool(output.get("accepted"))
         )
         escalation_ref = (

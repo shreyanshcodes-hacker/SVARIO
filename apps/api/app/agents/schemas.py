@@ -65,6 +65,17 @@ class AgentToolName(str, Enum):
     CREATE_SALON_APPOINTMENT = "create_salon_appointment"
     RESCHEDULE_SALON_APPOINTMENT = "reschedule_salon_appointment"
     CANCEL_SALON_APPOINTMENT = "cancel_salon_appointment"
+    # Stage 6 Clinic Workflow Tools
+    GET_CLINIC_INFORMATION = "get_clinic_information"
+    GET_CLINIC_DEPARTMENTS = "get_clinic_departments"
+    GET_CLINIC_DOCTORS = "get_clinic_doctors"
+    GET_CLINIC_SPECIALITIES = "get_clinic_specialities"
+    GET_CLINIC_CONSULTATION_TYPES = "get_clinic_consultation_types"
+    CHECK_CLINIC_AVAILABILITY = "check_clinic_availability"
+    CREATE_CLINIC_APPOINTMENT = "create_clinic_appointment"
+    RESCHEDULE_CLINIC_APPOINTMENT = "reschedule_clinic_appointment"
+    CANCEL_CLINIC_APPOINTMENT = "cancel_clinic_appointment"
+    REQUEST_CLINIC_HUMAN_ESCALATION = "request_clinic_human_escalation"
 
 
 class EscalationUrgency(str, Enum):
@@ -552,3 +563,186 @@ class AgentTurnResponse(BaseModel):
     emergency_guidance_issued: bool = False
     booking_created: bool = False
     context_snapshot: SessionConversationContext
+
+
+# ============================================================================
+# Stage 6 Clinic Workflow Tool Schemas
+# ============================================================================
+
+
+class GetClinicInformationToolInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class GetClinicInformationToolOutput(BaseModel):
+    clinic_name: str
+    description: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    address_summary: Optional[str] = None
+    timezone: str
+    operating_hours: List[WeekdayHoursItem]
+    supported_languages: List[LanguageCode]
+
+
+class GetClinicDepartmentsToolInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    active_only: bool = True
+
+
+class ClinicDepartmentSummaryItem(BaseModel):
+    department_id: str
+    name: str
+    description: Optional[str] = None
+
+
+class GetClinicDepartmentsToolOutput(BaseModel):
+    departments: List[ClinicDepartmentSummaryItem]
+    total_count: int
+
+
+class GetClinicSpecialitiesToolInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    active_only: bool = True
+
+
+class ClinicSpecialitySummaryItem(BaseModel):
+    speciality_id: str
+    name: str
+    description: Optional[str] = None
+
+
+class GetClinicSpecialitiesToolOutput(BaseModel):
+    specialities: List[ClinicSpecialitySummaryItem]
+    total_count: int
+
+
+class GetClinicDoctorsToolInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    department_id: Optional[UUID] = None
+    speciality_id: Optional[UUID] = None
+    active_only: bool = True
+
+
+class ClinicDoctorSummaryItem(BaseModel):
+    doctor_id: str
+    display_name: str
+    professional_title: Optional[str] = None
+    languages: List[str]
+    department_ids: List[str]
+    speciality_ids: List[str]
+    consultation_type_ids: List[str]
+
+
+class GetClinicDoctorsToolOutput(BaseModel):
+    doctors: List[ClinicDoctorSummaryItem]
+    total_count: int
+
+
+class GetClinicConsultationTypesToolInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    active_only: bool = True
+
+
+class ClinicConsultationTypeSummaryItem(BaseModel):
+    consultation_type_id: str
+    name: str
+    description: Optional[str] = None
+    duration_minutes: int
+    consultation_mode: str
+    fee_amount: Optional[float] = None
+    currency_code: Optional[str] = None
+
+
+class GetClinicConsultationTypesToolOutput(BaseModel):
+    consultation_types: List[ClinicConsultationTypeSummaryItem]
+    total_count: int
+
+
+class CheckClinicAvailabilityToolInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    consultation_type_id: UUID
+    target_date: str = Field(..., description="YYYY-MM-DD format")
+    doctor_id: Optional[UUID] = None
+    department_id: Optional[UUID] = None
+    speciality_id: Optional[UUID] = None
+
+
+class ClinicSlotSummaryItem(BaseModel):
+    doctor_id: str
+    doctor_name: str
+    starts_at: str
+    ends_at: str
+    timezone: str
+
+
+class CheckClinicAvailabilityToolOutput(BaseModel):
+    target_date: str
+    timezone: str
+    duration_minutes: int
+    available_slots: List[ClinicSlotSummaryItem]
+    total_slots: int
+
+
+class CreateClinicAppointmentToolInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    doctor_id: UUID
+    consultation_type_id: UUID
+    department_id: Optional[UUID] = None
+    patient_display_name: str = Field(..., min_length=2, max_length=120)
+    patient_contact: str = Field(..., min_length=5, max_length=80)
+    starts_at: str = Field(..., description="ISO-8601 datetime with timezone")
+    idempotency_key: Optional[str] = None
+
+
+class CreateClinicAppointmentToolOutput(BaseModel):
+    booked: bool
+    booking_reference: Optional[str] = None
+    appointment_id: Optional[str] = None
+    doctor_name: Optional[str] = None
+    consultation_type_name: Optional[str] = None
+    starts_at: Optional[str] = None
+    ends_at: Optional[str] = None
+    timezone: Optional[str] = None
+    status: str
+    message: str
+
+
+class RescheduleClinicAppointmentToolInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    booking_reference: str = Field(..., min_length=4, max_length=40)
+    patient_contact_verification: str = Field(..., min_length=4, max_length=80)
+    new_starts_at: str = Field(..., description="ISO-8601 datetime with timezone")
+    new_doctor_id: Optional[UUID] = None
+
+
+class RescheduleClinicAppointmentToolOutput(BaseModel):
+    rescheduled: bool
+    booking_reference: str
+    new_starts_at: Optional[str] = None
+    new_ends_at: Optional[str] = None
+    doctor_name: Optional[str] = None
+    status: str
+    message: str
+
+
+class CancelClinicAppointmentToolInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    booking_reference: str = Field(..., min_length=4, max_length=40)
+    patient_contact_verification: str = Field(..., min_length=4, max_length=80)
+    reason: Optional[str] = Field(default=None, max_length=250)
+
+
+class CancelClinicAppointmentToolOutput(BaseModel):
+    cancelled: bool
+    booking_reference: str
+    status: str
+    message: str
+
+
+class RequestClinicHumanEscalationToolInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str = Field(..., min_length=3, max_length=250)
+    summary: str = Field(..., min_length=3, max_length=1000)
+    urgency: EscalationUrgency = EscalationUrgency.STANDARD
+

@@ -457,4 +457,156 @@ def build_realtime_tool_definitions() -> List[Dict[str, Any]]:
                 "additionalProperties": False,
             },
         },
+        # Stage 6 Clinic Workflow Tools
+        {
+            "type": "function",
+            "name": "get_clinic_information",
+            "description": "Retrieve verified clinic profile, operating hours, location, and supported languages.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "get_clinic_departments",
+            "description": "List active clinical departments at the clinic.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "active_only": {"type": "boolean", "description": "Return only active departments."}
+                },
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "get_clinic_specialities",
+            "description": "List active medical specialities offered at the clinic.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "active_only": {"type": "boolean", "description": "Return only active specialities."}
+                },
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "get_clinic_doctors",
+            "description": "List clinic doctors, optionally filtered by department_id or speciality_id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "department_id": {"type": "string", "description": "Optional department UUID filter."},
+                    "speciality_id": {"type": "string", "description": "Optional speciality UUID filter."},
+                    "active_only": {"type": "boolean", "description": "Return only active doctors."},
+                },
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "get_clinic_consultation_types",
+            "description": "List active consultation types, modes (in_person/online), durations, and configured fees.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "active_only": {"type": "boolean", "description": "Return only active consultation types."}
+                },
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "check_clinic_availability",
+            "description": "Check real-time available clinic appointment slots for a consultation type and date.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "consultation_type_id": {"type": "string", "description": "UUID of the consultation type."},
+                    "target_date": {"type": "string", "description": "Date in YYYY-MM-DD format."},
+                    "doctor_id": {"type": "string", "description": "Optional doctor UUID filter."},
+                    "department_id": {"type": "string", "description": "Optional department UUID filter."},
+                    "speciality_id": {"type": "string", "description": "Optional speciality UUID filter."},
+                },
+                "required": ["consultation_type_id", "target_date"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "create_clinic_appointment",
+            "description": "Book a clinic appointment after confirming doctor, consultation type, date/time, and minimum patient details.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "doctor_id": {"type": "string", "description": "UUID of the doctor."},
+                    "consultation_type_id": {"type": "string", "description": "UUID of the consultation type."},
+                    "department_id": {"type": "string", "description": "Optional department UUID."},
+                    "patient_display_name": {"type": "string", "description": "Patient name."},
+                    "patient_contact": {"type": "string", "description": "Minimum patient contact (phone or email)."},
+                    "starts_at": {"type": "string", "description": "ISO-8601 datetime with timezone."},
+                    "idempotency_key": {"type": "string", "description": "Optional idempotency key."},
+                },
+                "required": [
+                    "doctor_id",
+                    "consultation_type_id",
+                    "patient_display_name",
+                    "patient_contact",
+                    "starts_at",
+                ],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "reschedule_clinic_appointment",
+            "description": "Reschedule an existing clinic appointment after verifying booking_reference and patient contact.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "booking_reference": {"type": "string", "description": "Clinic booking reference (e.g. CLN-...)."},
+                    "patient_contact_verification": {"type": "string", "description": "Patient contact or last 4+ digits for verification."},
+                    "new_starts_at": {"type": "string", "description": "New ISO-8601 datetime with timezone."},
+                    "new_doctor_id": {"type": "string", "description": "Optional new doctor UUID."},
+                },
+                "required": ["booking_reference", "patient_contact_verification", "new_starts_at"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "cancel_clinic_appointment",
+            "description": "Cancel an existing clinic appointment after verifying booking_reference and patient contact.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "booking_reference": {"type": "string", "description": "Clinic booking reference (e.g. CLN-...)."},
+                    "patient_contact_verification": {"type": "string", "description": "Patient contact or last 4+ digits for verification."},
+                    "reason": {"type": "string", "description": "Optional cancellation reason."},
+                },
+                "required": ["booking_reference", "patient_contact_verification"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "request_clinic_human_escalation",
+            "description": "Log a clinic human escalation or callback request for reception or clinical staff.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {"type": "string", "description": "Reason for escalation."},
+                    "summary": {"type": "string", "description": "Brief non-sensitive summary."},
+                    "urgency": {
+                        "type": "string",
+                        "enum": ["standard", "priority", "clinical_staff", "emergency_redirected"],
+                    },
+                },
+                "required": ["reason", "summary"],
+                "additionalProperties": False,
+            },
+        },
     ]

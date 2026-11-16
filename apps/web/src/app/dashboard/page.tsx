@@ -9,6 +9,7 @@ import { OrganizationOnboardingForm } from "@/components/organizations/Organizat
 import { OrganizationSwitcher } from "@/components/organizations/OrganizationSwitcher";
 import { useAuthOrganization } from "@/context/AuthOrganizationContext";
 import { fetchOnboardingBundle } from "@/lib/api";
+import { ClinicDashboardView } from "@/components/dashboard/ClinicDashboardView";
 import { SalonDashboardView } from "@/components/dashboard/SalonDashboardView";
 import type { OnboardingBundleData } from "@/types/platform";
 
@@ -517,6 +518,21 @@ export default function DashboardPage(): React.JSX.Element {
                 onboardingBundle?.business_id &&
                 session?.access_token && (
                   <SalonDashboardView
+                    accessToken={session.access_token}
+                    organizationId={activeOrganization.id}
+                    businessId={onboardingBundle.business_id}
+                    isOwnerOrAdmin={
+                      activeOrganization.membership_role === "owner" ||
+                      activeOrganization.membership_role === "admin"
+                    }
+                  />
+                )}
+
+              {/* Stage 6 Clinic Workflow Module UI */}
+              {activeOrganization.industry === "clinic" &&
+                onboardingBundle?.business_id &&
+                session?.access_token && (
+                  <ClinicDashboardView
                     accessToken={session.access_token}
                     organizationId={activeOrganization.id}
                     businessId={onboardingBundle.business_id}

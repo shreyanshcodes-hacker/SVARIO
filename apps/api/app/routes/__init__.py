@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 from app.routes.auth import router as auth_router
+from app.routes.clinics import router as clinics_router
 from app.routes.health import router as health_router
 from app.routes.industries import router as industries_router
 from app.routes.onboarding import router as onboarding_router
@@ -18,6 +19,7 @@ api_router.include_router(auth_router)
 api_router.include_router(organizations_router)
 api_router.include_router(onboarding_router)
 api_router.include_router(salons_router)
+api_router.include_router(clinics_router)
 api_router.include_router(voice_router)
 
 __all__ = ["api_router"]
