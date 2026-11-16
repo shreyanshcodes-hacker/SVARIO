@@ -34,13 +34,21 @@ from app.agents.schemas import (
     VoiceToolExecutionResponse,
 )
 from app.agents.tools import (
+    execute_cancel_salon_appointment,
+    execute_check_salon_availability,
+    execute_create_salon_appointment,
     execute_get_business_hours,
     execute_get_business_profile,
+    execute_get_salon_services,
+    execute_get_salon_staff,
     execute_request_human_escalation,
+    execute_reschedule_salon_appointment,
     execute_save_conversation_summary,
     execute_search_business_knowledge,
 )
 from app.modules.onboarding.schemas import LanguageCode, OnboardingBundleResponse
+from app.modules.organizations.schemas import OrganizationIndustry
+from app.modules.salons.service import SalonWorkflowService, get_salon_workflow_service
 from app.modules.voice.rate_limit import VoiceSessionRateLimiter, get_voice_rate_limiter
 
 WEEKDAY_NAMES = {
@@ -73,6 +81,7 @@ class AgentOrchestrator:
         response_timeout_seconds: float = 8.0,
         persist_summaries_enabled: bool = True,
         model_response_generator: Optional[ModelResponseGeneratorCallable] = None,
+        salon_service: Optional[SalonWorkflowService] = None,
     ) -> None:
         self._context_manager = context_manager or get_conversation_context_manager()
         self._intent_classifier = intent_classifier or IntentClassifier()
@@ -82,11 +91,17 @@ class AgentOrchestrator:
         self._response_timeout_seconds = response_timeout_seconds
         self._persist_summaries_enabled = persist_summaries_enabled
         self._model_response_generator = model_response_generator
+        self._salon_service = salon_service or get_salon_workflow_service()
 
     @property
     def context_manager(self) -> ConversationContextManager:
         """Return the context manager bound to this orchestrator."""
         return self._context_manager
+
+    @property
+    def salon_service(self) -> SalonWorkflowService:
+        """Return the salon workflow service bound to this orchestrator."""
+        return self._salon_service
 
     def _dispatch_tool_sync(
         self,
@@ -143,6 +158,61 @@ class AgentOrchestrator:
                 actor_user_id=actor_user_id,
             )
             return res.model_dump(mode="json")
+
+        # Stage 5 Salon Workflow Tools
+        if tool_name == AgentToolName.GET_SALON_SERVICES:
+            salon_res = execute_get_salon_services(
+                bundle=bundle,
+                raw_arguments=arguments,
+                salon_service=self._salon_service,
+                actor_user_id=actor_user_id,
+            )
+            return salon_res.model_dump(mode="json")
+
+        if tool_name == AgentToolName.GET_SALON_STAFF:
+            salon_res = execute_get_salon_staff(
+                bundle=bundle,
+                raw_arguments=arguments,
+                salon_service=self._salon_service,
+                actor_user_id=actor_user_id,
+            )
+            return salon_res.model_dump(mode="json")
+
+        if tool_name == AgentToolName.CHECK_SALON_AVAILABILITY:
+            salon_res = execute_check_salon_availability(
+                bundle=bundle,
+                raw_arguments=arguments,
+                salon_service=self._salon_service,
+                actor_user_id=actor_user_id,
+            )
+            return salon_res.model_dump(mode="json")
+
+        if tool_name == AgentToolName.CREATE_SALON_APPOINTMENT:
+            salon_res = execute_create_salon_appointment(
+                bundle=bundle,
+                raw_arguments=arguments,
+                salon_service=self._salon_service,
+                actor_user_id=actor_user_id,
+            )
+            return salon_res.model_dump(mode="json")
+
+        if tool_name == AgentToolName.RESCHEDULE_SALON_APPOINTMENT:
+            salon_res = execute_reschedule_salon_appointment(
+                bundle=bundle,
+                raw_arguments=arguments,
+                salon_service=self._salon_service,
+                actor_user_id=actor_user_id,
+            )
+            return salon_res.model_dump(mode="json")
+
+        if tool_name == AgentToolName.CANCEL_SALON_APPOINTMENT:
+            salon_res = execute_cancel_salon_appointment(
+                bundle=bundle,
+                raw_arguments=arguments,
+                salon_service=self._salon_service,
+                actor_user_id=actor_user_id,
+            )
+            return salon_res.model_dump(mode="json")
 
         raise ValueError(f"Unsupported tool: {tool_name}")
 
@@ -509,7 +579,7 @@ class AgentOrchestrator:
         # Step 6: Compose natural-language response strictly grounded in tool outputs
         if intent_result.missing_information:
             clarification_question = self._build_clarification_question(
-                intent_result=intent_result, language=lang
+                intent_result=intent_result, language=lang, industry=industry
             )
 
         if self._model_response_generator is not None:
@@ -547,6 +617,12 @@ class AgentOrchestrator:
             clarification_question=clarification_question,
         )
 
+        booking_created = any(
+            t.tool_name == AgentToolName.CREATE_SALON_APPOINTMENT
+            and t.status == "succeeded"
+            for t in executed_tools
+        )
+
         return AgentTurnResponse(
             session_id=session_id,
             organization_id=bundle.organization.id,
@@ -561,7 +637,7 @@ class AgentOrchestrator:
             escalation_reference=updated_ctx.escalation_reference,
             escalation_status=updated_ctx.escalation_status,
             emergency_guidance_issued=False,
-            booking_created=False,
+            booking_created=booking_created,
             context_snapshot=updated_ctx,
         )
 
@@ -608,10 +684,20 @@ class AgentOrchestrator:
         return {}
 
     def _build_clarification_question(
-        self, *, intent_result: IntentClassificationResult, language: LanguageCode
+        self,
+        *,
+        intent_result: IntentClassificationResult,
+        language: LanguageCode,
+        industry: Optional[OrganizationIndustry] = None,
     ) -> str:
         missing = intent_result.missing_information
         if intent_result.intent == AgentIntent.BOOKING_INTENT:
+            if industry == OrganizationIndustry.SALON:
+                if language == LanguageCode.HINDI:
+                    return "ज़रूर! क्या आपकी कोई पसंदीदा स्टाइलिस्ट या समय है?"
+                if language == LanguageCode.HINGLISH:
+                    return "Sure! Kya aapki koi preferred stylist ya time preference hai?"
+                return "Sure! Do you have a preferred stylist or time?"
             if language == LanguageCode.HINDI:
                 return "कृपया बताएं कि आप किस सेवा/विभाग और किस दिन व समय के लिए प्राथमिकता दर्ज कराना चाहते हैं?"
             if language == LanguageCode.HINGLISH:
@@ -705,7 +791,108 @@ class AgentOrchestrator:
                 f"Please contact our reception desk directly at {bundle.profile.phone or bundle.profile.email or 'our main desk'}."
             )
 
-        # 5. Booking / Rescheduling / Cancellation boundaries (Stage 4: never claim booking was created)
+        # 4b. Stage 5 Salon Workflow Tool Results
+        create_appt_tool = next(
+            (t for t in executed_tools if t.tool_name == AgentToolName.CREATE_SALON_APPOINTMENT and t.status == "succeeded"),
+            None,
+        )
+        if create_appt_tool is not None:
+            out = create_appt_tool.output
+            b_ref = out.get("booking_reference")
+            s_name = out.get("service_name")
+            st_name = out.get("staff_name")
+            a_date = out.get("appointment_date")
+            s_time = out.get("start_time")
+            if lang == LanguageCode.HINDI:
+                return (
+                    f"आपका {s_name} के लिए {a_date} को {s_time} बजे {st_name} के साथ अपॉइंटमेंट सफलतापूर्वक कन्फर्म हो गया है! "
+                    f"बुकिंग संदर्भ संख्या {b_ref} है। हम {biz_name} में आपका स्वागत करने के लिए तत्पर हैं।"
+                )
+            if lang == LanguageCode.HINGLISH:
+                return (
+                    f"Aapka {s_name} ke liye {a_date} ko {s_time} par {st_name} ke saath appointment confirm ho gaya hai! "
+                    f"Booking reference number {b_ref} hai. {biz_name} mein aapka swagat hai!"
+                )
+            return (
+                f"Your appointment for {s_name} on {a_date} at {s_time} with {st_name} is confirmed! "
+                f"Your booking reference is {b_ref}. We look forward to seeing you at {biz_name}!"
+            )
+
+        resched_tool = next(
+            (t for t in executed_tools if t.tool_name == AgentToolName.RESCHEDULE_SALON_APPOINTMENT and t.status == "succeeded"),
+            None,
+        )
+        if resched_tool is not None:
+            out = resched_tool.output
+            b_ref = out.get("booking_reference")
+            n_date = out.get("new_date")
+            n_time = out.get("new_start_time")
+            st_name = out.get("staff_name")
+            if lang == LanguageCode.HINDI:
+                return f"अपॉइंटमेंट {b_ref} सफलतापूर्वक {n_date} को {n_time} बजे {st_name} के साथ रीशेड्यूल कर दिया गया है।"
+            if lang == LanguageCode.HINGLISH:
+                return f"Appointment {b_ref} successfully {n_date} ko {n_time} par {st_name} ke saath reschedule ho gaya hai."
+            return f"Your appointment {b_ref} has been successfully rescheduled to {n_date} at {n_time} with {st_name}."
+
+        cancel_tool = next(
+            (t for t in executed_tools if t.tool_name == AgentToolName.CANCEL_SALON_APPOINTMENT and t.status == "succeeded"),
+            None,
+        )
+        if cancel_tool is not None:
+            out = cancel_tool.output
+            b_ref = out.get("booking_reference")
+            s_name = out.get("service_name")
+            if lang == LanguageCode.HINDI:
+                return f"आपका {s_name} का अपॉइंटमेंट (संदर्भ: {b_ref}) सफलतापूर्वक रद्द कर दिया गया है।"
+            if lang == LanguageCode.HINGLISH:
+                return f"Aapka {s_name} ka appointment (reference: {b_ref}) successfully cancel kar diya gaya hai."
+            return f"Your appointment {b_ref} for {s_name} has been successfully cancelled."
+
+        avail_tool = next(
+            (t for t in executed_tools if t.tool_name == AgentToolName.CHECK_SALON_AVAILABILITY and t.status == "succeeded"),
+            None,
+        )
+        if avail_tool is not None:
+            out = avail_tool.output
+            s_name = out.get("service_name")
+            r_date = out.get("requested_date")
+            slots = out.get("available_slots", [])
+            is_closed = out.get("is_business_closed", False)
+            closure_reason = out.get("closure_reason")
+            if is_closed:
+                return f"I checked our schedule, and {biz_name} is closed on {r_date} ({closure_reason or 'closed'}). Would you like to check another date?"
+            if not slots:
+                return f"I checked our availability for {s_name} on {r_date}, but there are currently no available openings. Would you like to try another date or check our operating hours?"
+            slot_times = [s["start_time"] for s in slots[:4]]
+            times_str = ", ".join(slot_times)
+            if lang == LanguageCode.HINDI:
+                return f"मुझे {r_date} को {s_name} के लिए निम्नलिखित समय उपलब्ध मिले हैं: {times_str}। क्या आप इनमें से कोई समय बुक करना चाहेंगे?"
+            if lang == LanguageCode.HINGLISH:
+                return f"Mujhe {r_date} ko {s_name} ke liye ye time slots available mile hain: {times_str}. Kya aap inme se koi slot book karna chahenge?"
+            return f"We have slots available for {s_name} on {r_date} around {times_str}. Would you like me to book one of these for you?"
+
+        services_tool = next(
+            (t for t in executed_tools if t.tool_name == AgentToolName.GET_SALON_SERVICES and t.status == "succeeded"),
+            None,
+        )
+        if services_tool is not None:
+            services_list = services_tool.output.get("services", [])
+            if services_list:
+                items_str = "; ".join(f"{s['name']} ({s['currency']} {s['price']:.0f}, {s['duration_minutes']} mins)" for s in services_list[:6])
+                return f"Our salon offers the following treatments: {items_str}. Would you like to check availability or book one?"
+            return f"{biz_name} offers hair styling, coloring, facials, and grooming services. Would you like to check availability for any of these?"
+
+        staff_tool = next(
+            (t for t in executed_tools if t.tool_name == AgentToolName.GET_SALON_STAFF and t.status == "succeeded"),
+            None,
+        )
+        if staff_tool is not None:
+            staff_list = staff_tool.output.get("staff", [])
+            if staff_list:
+                names_str = ", ".join(f"{s['name']} ({s['role']})" for s in staff_list[:5])
+                return f"Our expert stylists include: {names_str}. Would you like to book an appointment with any of them?"
+
+        # 5. Booking / Rescheduling / Cancellation boundaries (For Clinic / Hospital / non-salon)
         if intent_result.intent == AgentIntent.BOOKING_INTENT:
             summary_tool = next(
                 (

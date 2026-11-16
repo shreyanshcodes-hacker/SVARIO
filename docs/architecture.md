@@ -1,6 +1,6 @@
 # SVARIO — Multi-Industry Architecture Specification
 
-**Milestone:** Stage 4 — AI Agent & Conversational Intelligence  
+**Milestone:** Stage 5 — Salon Workflow Module  
 **Roadmap Version:** 2.0  
 **Tagline:** *AI that speaks for your business.*
 
@@ -10,20 +10,20 @@
 
 **SVARIO** is a multi-industry AI Voice Agent Platform engineered for three high-call-volume service verticals:
 
-1. **Salons** (`salon` / `app.agents.industries.salon`) — Beauty, hair, and wellness studios.
+1. **Salons** (`salon` / `app.modules.salons` / `app.agents.industries.salon`) — Beauty, hair, nail, and wellness studios with multi-stylist appointment orchestration.
 2. **Clinics** (`clinic` / `app.agents.industries.clinic`) — Outpatient, dental, dermatology, physiotherapy, and specialty clinics.
 3. **Hospitals** (`hospital` / `app.agents.industries.hospital`) — Multi-specialty hospitals and institutional OPD switchboards.
 
-### Core Separation of Concerns (Stage 4)
+### Core Separation of Concerns
 - **AI interprets and communicates.**
 - **FastAPI validates and executes.**
 - **Supabase is the source of truth.**
 
-Svario separates **multi-tenant identity & organization governance** (`Stage 1`), **organization-scoped business onboarding** (`Stage 2`), **shared browser WebRTC voice infrastructure** (`Stage 3`), and **modular AI agent & conversational intelligence** (`Stage 4`) from **transactional appointment booking workflows** (`Stage 5+`).
+Svario separates **multi-tenant identity & organization governance** (`Stage 1`), **organization-scoped business onboarding** (`Stage 2`), **shared browser WebRTC voice infrastructure** (`Stage 3`), **modular AI agent & conversational intelligence** (`Stage 4`), and **salon workflow domain module** (`Stage 5`) from future healthcare clinic/hospital workflows (`Stage 6+`).
 
 ---
 
-## 2. Monorepo Topology (Stage 4)
+## 2. Monorepo Topology (Stage 5)
 
 ```text
 Voice agent-PS-03/
@@ -37,27 +37,72 @@ Voice agent-PS-03/
 │   │   │   │   ├── forgot-password/page.tsx # Password recovery request
 │   │   │   │   ├── reset-password/page.tsx  # Password reset completion
 │   │   │   │   ├── onboarding/page.tsx    # Protected 8-step Stage 2 business onboarding wizard
-│   │   │   │   ├── dashboard/page.tsx     # Protected workspace, org switcher & Voice Test Lab link
-│   │   │   │   └── voice-test/page.tsx    # Stage 3–4 Browser WebRTC Voice & Agent Test Lab
+│   │   │   │   ├── dashboard/page.tsx     # Protected workspace, org switcher, onboarding & Salon Hub
+│   │   │   │   └── voice-test/page.tsx    # Stage 3–5 Browser WebRTC Voice & Agent Test Lab
 │   │   │   ├── components/
 │   │   │   │   ├── auth/                  # Reusable AuthShell, Login, Signup, Recovery forms
 │   │   │   │   ├── organizations/         # OrganizationOnboardingForm & OrganizationSwitcher
 │   │   │   │   ├── onboarding/            # OnboardingWizard (8-step wizard + healthcare notices)
+│   │   │   │   ├── dashboard/             # SalonDashboardView (Services, Staff, Appointments, Availability)
 │   │   │   │   └── voice/                 # VoiceOrbWaveform, VoiceSessionPanel & VoiceTestView
 │   │   │   ├── context/
 │   │   │   │   └── AuthOrganizationContext.tsx # Session restoration + active org context
 │   │   │   ├── lib/
-│   │   │   │   ├── api.ts                 # Typed FastAPI client (Stage 1–4 endpoints)
+│   │   │   │   ├── api.ts                 # Typed FastAPI client (Stages 1–5 endpoints)
 │   │   │   │   ├── supabase/client.ts     # Browser @supabase/supabase-js client
 │   │   │   │   └── voice/                 # WebRTC client, 10-state machine, tool execution & events
-│   │   │   ├── config/brand.ts
-│   │   │   ├── types/platform.ts
-│   │   │   └── __tests__/                 # Vitest + React Testing Library suite (Stages 1–4)
+│   │   │   ├── types/
+│   │   │   │   ├── platform.ts            # Core platform types
+│   │   │   │   └── salon.ts               # Stage 5 Salon domain contracts
+│   │   │   └── __tests__/                 # Vitest + React Testing Library suite (Stages 1–5)
 │   │   ├── package.json
 │   │   └── vitest.config.ts
 │   └── api/                               # Python + FastAPI + Pydantic v2 + PyJWT[crypto]
 │       ├── app/
-│       │   ├── agents/                    # Stage 4 Modular AI Agent Architecture
+│       │   ├── agents/                    # Stage 4–5 Modular AI Agent Architecture
+│       │   │   ├── base.py                # BaseIndustryAgent contract
+│       │   │   ├── schemas.py             # Intents, SafetyFlags, 11 Tool I/O & Session Context schemas
+│       │   │   ├── instructions.py        # Server-composed system prompts & Realtime tool definitions
+│       │   │   ├── intent.py              # Typed IntentClassifier & multilingual detector (en/hi/hinglish)
+│       │   │   ├── context.py             # Tenant-isolated ConversationContextManager & PII redaction
+│       │   │   ├── orchestrator.py        # Controlled AgentOrchestrator & tool execution engine
+│       │   │   ├── industries/            # SalonAgent (6 salon tools), ClinicAgent & HospitalAgent
+│       │   │   └── tools/                 # Salon & baseline backend-validated tools
+│       │   ├── modules/
+│       │   │   ├── salons/                # Stage 5 Salon Domain Module (Schemas, Repository, Service)
+│       │   │   ├── organizations/         # Multi-tenant schemas, repository & RBAC service
+│       │   │   ├── onboarding/            # Stage 2 schemas, repository & RBAC service
+│       │   │   ├── voice/                 # Stage 3–5 session & tool execution service
+│       │   │   └── shared/                # Voice, AI, Scheduling, Notifications contracts
+│       │   ├── routes/
+│       │   │   ├── salons.py              # REST CRUD for services, staff, shifts, breaks, holidays, appointments
+│       │   │   ├── voice.py               # WebRTC sessions, tool dispatch, agent turns
+│       │   │   ├── onboarding.py          # Onboarding routes
+│       │   │   └── organizations.py       # Organization & member routes
+│       │   └── main.py
+│       ├── tests/                         # Pytest suite (Auth, Orgs, Onboarding, Voice, Salon Stage 5)
+│       └── requirements.txt
+├── supabase/
+│   └── migrations/                        # PostgreSQL migrations (including 20261110000006 Stage 5 Salon)
+└── docs/
+```
+
+---
+
+## 3. Stage 5 Salon Workflow Database Architecture & Concurrency Protection
+
+Stage 5 introduces 7 dedicated tables in `public` with forced RLS and a database-level GiST exclusion constraint preventing double-booking:
+
+1. `public.salon_services`: Services catalog (name, category, price > 0, duration 5..480 min, active flag).
+2. `public.salon_staff`: Stylist profiles (name, role, active flag, contact details).
+3. `public.salon_staff_services`: M:N junction assigning services to qualified stylists.
+4. `public.salon_staff_working_hours`: Weekly recurring shift windows (0=Sunday..6=Saturday).
+5. `public.salon_staff_breaks`: Recurring or date-specific break intervals (e.g., lunch breaks).
+6. `public.salon_holidays`: Whole-salon closures and staff leaves (full-day or partial).
+7. `public.salon_appointments`: Transactional booking records with:
+   - **GiST Exclusion Constraint (`btree_gist`):** `excl_salon_appointments_no_staff_overlap` enforces `EXCLUDE USING gist (staff_id WITH =, tstzrange(start_at, end_at, '[)') WITH &&) WHERE (status IN ('confirmed', 'rescheduled'))`. This guarantees zero double-booking even under concurrent race conditions.
+   - **Idempotency Key:** Protects against duplicate network submissions.
+   - **Strict RLS:** All 7 tables enforce multi-tenant isolation via `organization_id IN (SELECT organization_id FROM public.organization_members WHERE user_id = (SELECT auth.uid()))`.
 │       │   │   ├── base.py                # BaseIndustryAgent contract
 │       │   │   ├── schemas.py             # 14 Intents, SafetyFlags, Tool I/O & Session Context schemas
 │       │   │   ├── instructions.py        # Server-composed Stage 4 system prompts & 5 Realtime tools

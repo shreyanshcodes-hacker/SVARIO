@@ -1,6 +1,8 @@
-"""Stage 4 Salon Industry Agent (`OrganizationIndustry.SALON`)."""
+"""Stage 5 Salon Industry Agent (`OrganizationIndustry.SALON`)."""
 
+from typing import List
 from app.agents.base import BaseIndustryAgent
+from app.agents.schemas import AgentToolName
 from app.modules.onboarding.schemas import OnboardingBundleResponse
 from app.modules.organizations.schemas import OrganizationIndustry
 
@@ -16,15 +18,39 @@ class SalonAgent(BaseIndustryAgent):
     def is_healthcare_vertical(self) -> bool:
         return False
 
+    @property
+    def allowed_tools(self) -> List[AgentToolName]:
+        """Approved backend tools available to the salon agent in Stage 5."""
+        return [
+            AgentToolName.GET_BUSINESS_PROFILE,
+            AgentToolName.GET_BUSINESS_HOURS,
+            AgentToolName.SEARCH_BUSINESS_KNOWLEDGE,
+            AgentToolName.SAVE_CONVERSATION_SUMMARY,
+            AgentToolName.REQUEST_HUMAN_ESCALATION,
+            AgentToolName.GET_SALON_SERVICES,
+            AgentToolName.GET_SALON_STAFF,
+            AgentToolName.CHECK_SALON_AVAILABILITY,
+            AgentToolName.CREATE_SALON_APPOINTMENT,
+            AgentToolName.RESCHEDULE_SALON_APPOINTMENT,
+            AgentToolName.CANCEL_SALON_APPOINTMENT,
+        ]
+
     def build_industry_directives(self, bundle: OnboardingBundleResponse) -> str:
         business_name = bundle.profile.display_name
         return (
             f"SALON INDUSTRY INSTRUCTIONS ({business_name}):\n"
-            "- Help callers with general salon information, location, and operating hours.\n"
-            "- Explain salon services, treatments, and pricing ONLY if verified in the business profile or active FAQs retrieved via `search_business_knowledge`.\n"
-            "- Never invent hair/beauty service prices, package discounts, or stylist availability.\n"
-            "- If a caller wants to book, reschedule, or cancel a salon appointment, politely clarify that live appointment booking is not executed automatically in this stage; collect their preferred service, preferred day/time, and save those preferences via `save_conversation_summary` or offer human front-desk assistance via `request_human_escalation`.\n"
-            "- Escalate uncertain or custom bridal/chemical consultation requests to the salon front desk using `request_human_escalation`."
+            "- Help callers with general salon information, location, operating hours, and active services.\n"
+            "- To inspect treatments, pricing, and durations, call `get_salon_services`.\n"
+            "- To view qualified stylists or specialists, call `get_salon_staff`.\n"
+            "- When a customer wants to book an appointment (e.g. 'I want a haircut tomorrow around 4 PM'):\n"
+            "  1. Identify the requested service (or ask clarifying question if missing).\n"
+            "  2. Check actual real-time availability via `check_salon_availability`.\n"
+            "  3. Quote the available slot(s) and ask the customer for confirmation.\n"
+            "  4. When the customer confirms, call `create_salon_appointment` with customer name and phone.\n"
+            "  5. Confirm the booking ONLY after receiving a successful backend response with the booking reference.\n"
+            "- When a customer wants to reschedule, verify availability and call `reschedule_salon_appointment`.\n"
+            "- When a customer wants to cancel, call `cancel_salon_appointment`.\n"
+            "- Never invent prices, durations, or booking confirmations without backend confirmation."
         )
 
     def build_emergency_response(

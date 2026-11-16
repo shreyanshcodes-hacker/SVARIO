@@ -1,7 +1,7 @@
 # SVARIO — Staged Delivery Plan
 
-**Current Active Milestone:** **STAGE 4 — AI AGENT & CONVERSATIONAL INTELLIGENCE**  
-**Status:** Complete (Awaiting Approval to Proceed to Stage 5)
+**Current Active Milestone:** **STAGE 5 — SALON WORKFLOW MODULE**  
+**Status:** Complete (Awaiting Approval to Proceed to Stage 6)
 
 ---
 
@@ -27,13 +27,22 @@
 
 ---
 
-### Stage 4 — AI Agent & Conversational Intelligence (Current Milestone — Complete)
-- **Objective:** Implement modular multi-industry AI agent intelligence, typed intent classification, grounded business knowledge retrieval, session-scoped context, controlled backend tool execution, human escalation workflows, and multilingual support (`en`, `hi`, `hinglish`).
+### Stage 4 — AI Agent & Conversational Intelligence (Completed & Approved)
+- Implemented modular multi-industry AI agent intelligence, typed intent classification, grounded business knowledge retrieval, session-scoped context, controlled backend tool execution, human escalation workflows, and multilingual support (`en`, `hi`, `hinglish`).
+
+---
+
+### Stage 5 — Salon Workflow Module (Current Milestone — Complete)
+- **Objective:** Implement complete end-to-end salon appointment scheduling, service catalog CRUD, staff rosters and service assignments, weekly working schedules, breaks, whole-salon holidays and closures, dynamic non-conflicting slot availability calculation, transactional appointment booking with GiST double-booking protection and idempotency, AI voice agent salon tools, and interactive frontend operations dashboard.
 - **Completed Deliverables:**
-  - **Phase 4A & 4B — Modular Agent Architecture & Industry Instructions (`apps/api/app/agents/`):** `BaseIndustryAgent`, `SalonAgent`, `ClinicAgent`, `HospitalAgent`, and `build_stage4_agent_instructions`.
-  - **Phase 4C — Typed Intent Recognition (`intent.py` & `schemas.py`):** 14 typed intents (`greeting`, `business_information`, `opening_hours`, `location`, `services_enquiry`, `pricing_enquiry`, `speciality_enquiry`, `department_enquiry`, `booking_intent`, `rescheduling_intent`, `cancellation_intent`, `human_support`, `emergency_intent`, `unknown`) + `SafetyFlag` detection.
-  - **Phase 4D, 4E & 4F — Grounded Knowledge Retrieval, Session Context & 5 Structured Tools (`tools/` & `context.py`):** `get_business_profile`, `get_business_hours`, `search_business_knowledge`, `save_conversation_summary`, and `request_human_escalation`, backed by `conversation_summaries` and `escalation_requests` with forced RLS on Supabase.
-  - **Phase 4G, 4H & 4I — Controlled Orchestrator, Human Escalation & Realtime Voice Integration (`orchestrator.py`, `routes/voice.py`, `webrtcClient.ts`):** `POST /api/v1/voice/tools/execute`, `POST /api/v1/agent/turns`, `GET /api/v1/voice/sessions/{session_id}/context`, and automatic `response.function_call_arguments.done` -> `conversation.item.create` + `response.create` handling over `oai-events`.
-  - **Phase 4J & 4K — Multilingual Support (`en`, `hi`, `hinglish`) & Reproducible Multi-Industry AI Evaluation Suite (`tests/test_stage4_agent.py` & `stage4-agent-voice.test.tsx`).**
-- **Explicitly Excluded from Stage 4:**
-  - Live appointment booking, rescheduling, or cancellation execution (`Stage 5+`)
+  - **A. Salon Services (`public.salon_services`):** Name, category, price (> 0), duration (5-480 min), active/inactive flag. Owner/Admin only modification.
+  - **B. Staff Management (`public.salon_staff`, `public.salon_staff_services`):** Stylist profiles, active flag, many-to-many service assignments.
+  - **C. Working Schedules & Breaks (`public.salon_staff_working_hours`, `public.salon_staff_breaks`, `public.salon_holidays`):** Weekly stylist shifts, recurring/date-specific breaks, whole-day/partial salon closures and staff leaves.
+  - **D. Dynamic Availability Calculation Engine:** Real-time computation respecting salon hours, stylist shifts, break intervals, whole/partial closures, and existing appointments.
+  - **E. Appointment Management (`public.salon_appointments`):** Double-booking prevention via PostgreSQL `btree_gist` exclusion constraint `excl_salon_appointments_no_staff_overlap`, idempotency key replay, lifecycle transitions (`confirmed`, `rescheduled`, `cancelled`, `completed`, `no_show`).
+  - **F. AI Voice Agent Salon Tools:** 6 structured tools (`get_salon_services`, `get_salon_staff`, `check_salon_availability`, `create_salon_appointment`, `reschedule_salon_appointment`, `cancel_salon_appointment`), strict server-side context resolution, no trusted model tenant IDs.
+  - **G. Frontend Salon Dashboard View (`SalonDashboardView.tsx`):** Services catalog, stylist roster, calendar/booking manager, and live slot availability calculator.
+  - **H. Security & RLS:** 7 Supabase tables with `ENABLE ROW LEVEL SECURITY` and forced RLS, strict organization isolation.
+  - **I. Verification & Testing:** 55 backend tests (`pytest apps/api/tests -q`), 23 frontend tests (`vitest run`), Next.js 15 production build.
+- **Explicitly Excluded from Stage 5:**
+  - Clinic doctor consultation booking or hospital OPD department workflows (`Stage 6+`).

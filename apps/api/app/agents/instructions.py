@@ -293,4 +293,168 @@ def build_realtime_tool_definitions() -> List[Dict[str, Any]]:
                 "additionalProperties": False,
             },
         },
+        {
+            "type": "function",
+            "name": "get_salon_services",
+            "description": "Retrieve active salon services, treatments, categories, pricing, and durations.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "description": "Optional category filter (e.g. hair, nails, facial).",
+                    },
+                    "is_active": {
+                        "type": "boolean",
+                        "description": "Filter by active status (default true).",
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "get_salon_staff",
+            "description": "Retrieve qualified stylists and specialists, optionally filtered by service_id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "service_id": {
+                        "type": "string",
+                        "description": "Optional UUID of a service to filter qualified staff.",
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "check_salon_availability",
+            "description": "Check real-time non-conflicting available appointment slots for a salon service on a date (YYYY-MM-DD).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "service_id": {
+                        "type": "string",
+                        "description": "UUID of the salon service.",
+                    },
+                    "requested_date": {
+                        "type": "string",
+                        "description": "Date in YYYY-MM-DD format (e.g. 2026-11-16).",
+                    },
+                    "staff_id": {
+                        "type": "string",
+                        "description": "Optional UUID of preferred stylist.",
+                    },
+                },
+                "required": ["service_id", "requested_date"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "create_salon_appointment",
+            "description": "Book a confirmed salon appointment for a customer after verifying availability and getting customer confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "service_id": {
+                        "type": "string",
+                        "description": "UUID of the salon service.",
+                    },
+                    "appointment_date": {
+                        "type": "string",
+                        "description": "Date in YYYY-MM-DD format.",
+                    },
+                    "start_time": {
+                        "type": "string",
+                        "description": "Start time in HH:MM format from check_salon_availability.",
+                    },
+                    "customer_name": {
+                        "type": "string",
+                        "description": "Full name of the customer.",
+                    },
+                    "customer_phone": {
+                        "type": "string",
+                        "description": "Phone number of the customer.",
+                    },
+                    "customer_email": {
+                        "type": "string",
+                        "description": "Optional email of the customer.",
+                    },
+                    "staff_id": {
+                        "type": "string",
+                        "description": "Optional UUID of the preferred stylist.",
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Optional notes or requests from the customer.",
+                    },
+                    "idempotency_key": {
+                        "type": "string",
+                        "description": "Optional client idempotency key to prevent double-booking.",
+                    },
+                },
+                "required": [
+                    "service_id",
+                    "appointment_date",
+                    "start_time",
+                    "customer_name",
+                    "customer_phone",
+                ],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "reschedule_salon_appointment",
+            "description": "Reschedule an existing confirmed salon appointment to a new date and start time.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "appointment_id": {
+                        "type": "string",
+                        "description": "UUID of the existing salon appointment.",
+                    },
+                    "new_date": {
+                        "type": "string",
+                        "description": "New date in YYYY-MM-DD format.",
+                    },
+                    "new_start_time": {
+                        "type": "string",
+                        "description": "New start time in HH:MM format.",
+                    },
+                    "new_staff_id": {
+                        "type": "string",
+                        "description": "Optional new staff UUID.",
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Optional updated notes.",
+                    },
+                },
+                "required": ["appointment_id", "new_date", "new_start_time"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "cancel_salon_appointment",
+            "description": "Cancel an existing confirmed salon appointment.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "appointment_id": {
+                        "type": "string",
+                        "description": "UUID of the salon appointment to cancel.",
+                    },
+                    "cancellation_reason": {
+                        "type": "string",
+                        "description": "Optional reason for cancellation.",
+                    },
+                },
+                "required": ["appointment_id"],
+                "additionalProperties": False,
+            },
+        },
     ]

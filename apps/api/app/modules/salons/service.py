@@ -1,0 +1,759 @@
+"""Service layer for Stage 5 Salon Workflow Module.
+
+Orchestrates:
+- Salon Services CRUD with price (> 0) and duration (5-480 min) validation.
+- Staff Profiles, Assignments, Schedules, Breaks, and Holidays.
+- Real-time dynamic Availability Calculation considering opening hours,
+  staff shifts, breaks, holidays, and active bookings.
+- Appointment Booking, Rescheduling, and Cancellation with database
+  concurrency protection, idempotency handling, and audit logging.
+"""
+
+from __future__ import annotations
+
+from datetime import date, datetime, time, timedelta, timezone
+from typing import Any, Dict, List, Optional
+from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from fastapi import Depends, HTTPException, status
+from app.core.auth import AuthenticatedUser
+from app.core.config import Settings, get_settings
+from app.modules.onboarding.repository import OnboardingRepositoryProtocol
+from app.modules.onboarding.service import get_onboarding_repository
+from app.modules.organizations.schemas import OrganizationRole
+from app.modules.salons.repository import (
+    InMemorySalonRepository,
+    SalonRepositoryProtocol,
+    get_in_memory_salon_repository,
+)
+from app.modules.salons.schemas import (
+    SalonAppointmentCancelRequest,
+    SalonAppointmentCreateRequest,
+    SalonAppointmentRescheduleRequest,
+    SalonAppointmentResponse,
+    SalonAppointmentSource,
+    SalonAppointmentStatus,
+    SalonAvailabilityResponse,
+    SalonAvailabilitySlot,
+    SalonHolidayCreateRequest,
+    SalonHolidayResponse,
+    SalonServiceCreateRequest,
+    SalonServiceResponse,
+    SalonServiceUpdateRequest,
+    SalonStaffBreakCreateRequest,
+    SalonStaffBreakResponse,
+    SalonStaffCreateRequest,
+    SalonStaffResponse,
+    SalonStaffUpdateRequest,
+    SalonStaffWorkingHoursItem,
+    SalonStaffWorkingHoursUpdateRequest,
+    format_minutes_to_hhmm,
+    parse_hhmm_to_minutes,
+)
+
+
+class SalonWorkflowService:
+    """Domain service for Salon Workflow management."""
+
+    def __init__(
+        self,
+        settings: Settings,
+        salon_repo: SalonRepositoryProtocol,
+        onboarding_repo: OnboardingRepositoryProtocol,
+    ) -> None:
+        self._settings = settings
+        self._salon_repo = salon_repo
+        self._onboarding_repo = onboarding_repo
+
+    async def _verify_org_access(
+        self, actor: AuthenticatedUser, organization_id: UUID, require_admin: bool = False
+    ) -> OrganizationRole:
+        """Verify the actor is a member of the organization, optionally requiring owner or admin."""
+        if actor.issuer == "https://svario.internal/auth/v1":
+            if require_admin:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied: voice agent cannot modify administrative configuration.",
+                )
+            return OrganizationRole.STAFF
+
+        role = await self._onboarding_repo.get_member_role(actor, organization_id)
+        if role is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: you are not a member of this organization.",
+            )
+        if require_admin and role not in {OrganizationRole.OWNER, OrganizationRole.ADMIN}:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: salon administrative privileges (owner or admin) required.",
+            )
+        return role
+
+    async def _resolve_business_timezone(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID
+    ) -> str:
+        """Retrieve the configured business timezone (defaulting to Asia/Kolkata or UTC)."""
+        try:
+            hours = await self._onboarding_repo.get_business_hours(actor, organization_id, business_id)
+            return hours.timezone or "Asia/Kolkata"
+        except Exception:
+            return "Asia/Kolkata"
+
+    # =========================================================================
+    # A. SALON SERVICES CRUD
+    # =========================================================================
+    async def create_service(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, payload: SalonServiceCreateRequest
+    ) -> SalonServiceResponse:
+        await self._verify_org_access(actor, organization_id, require_admin=True)
+        if payload.price <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Salon service price must be strictly greater than 0.",
+            )
+        if payload.duration_minutes < 5 or payload.duration_minutes > 480:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Salon service duration must be between 5 and 480 minutes.",
+            )
+        return await self._salon_repo.create_service(actor, organization_id, business_id, payload)
+
+    async def get_service(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, service_id: UUID
+    ) -> SalonServiceResponse:
+        await self._verify_org_access(actor, organization_id, require_admin=False)
+        return await self._salon_repo.get_service(actor, organization_id, business_id, service_id)
+
+    async def list_services(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, category: Optional[str] = None, is_active: Optional[bool] = None
+    ) -> List[SalonServiceResponse]:
+        await self._verify_org_access(actor, organization_id, require_admin=False)
+        return await self._salon_repo.list_services(actor, organization_id, business_id, category, is_active)
+
+    async def update_service(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, service_id: UUID, payload: SalonServiceUpdateRequest
+    ) -> SalonServiceResponse:
+        await self._verify_org_access(actor, organization_id, require_admin=True)
+        if payload.price is not None and payload.price <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Salon service price must be strictly greater than 0.",
+            )
+        if payload.duration_minutes is not None and (payload.duration_minutes < 5 or payload.duration_minutes > 480):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Salon service duration must be between 5 and 480 minutes.",
+            )
+        return await self._salon_repo.update_service(actor, organization_id, business_id, service_id, payload)
+
+    async def delete_service(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, service_id: UUID
+    ) -> None:
+        await self._verify_org_access(actor, organization_id, require_admin=True)
+        await self._salon_repo.delete_service(actor, organization_id, business_id, service_id)
+
+    # =========================================================================
+    # B. STAFF MANAGEMENT
+    # =========================================================================
+    async def create_staff(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, payload: SalonStaffCreateRequest
+    ) -> SalonStaffResponse:
+        await self._verify_org_access(actor, organization_id, require_admin=True)
+        return await self._salon_repo.create_staff(actor, organization_id, business_id, payload)
+
+    async def get_staff(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, staff_id: UUID
+    ) -> SalonStaffResponse:
+        await self._verify_org_access(actor, organization_id, require_admin=False)
+        return await self._salon_repo.get_staff(actor, organization_id, business_id, staff_id)
+
+    async def list_staff(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, service_id: Optional[UUID] = None, is_active: Optional[bool] = None
+    ) -> List[SalonStaffResponse]:
+        await self._verify_org_access(actor, organization_id, require_admin=False)
+        return await self._salon_repo.list_staff(actor, organization_id, business_id, service_id, is_active)
+
+    async def update_staff(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, staff_id: UUID, payload: SalonStaffUpdateRequest
+    ) -> SalonStaffResponse:
+        await self._verify_org_access(actor, organization_id, require_admin=True)
+        return await self._salon_repo.update_staff(actor, organization_id, business_id, staff_id, payload)
+
+    async def delete_staff(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, staff_id: UUID
+    ) -> None:
+        await self._verify_org_access(actor, organization_id, require_admin=True)
+        await self._salon_repo.delete_staff(actor, organization_id, business_id, staff_id)
+
+    async def assign_staff_services(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, staff_id: UUID, service_ids: List[UUID]
+    ) -> SalonStaffResponse:
+        await self._verify_org_access(actor, organization_id, require_admin=True)
+        return await self._salon_repo.assign_staff_services(actor, organization_id, business_id, staff_id, service_ids)
+
+    # =========================================================================
+    # C. WORKING SCHEDULES, BREAKS & HOLIDAYS
+    # =========================================================================
+    async def update_staff_working_hours(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, staff_id: UUID, payload: SalonStaffWorkingHoursUpdateRequest
+    ) -> List[SalonStaffWorkingHoursItem]:
+        await self._verify_org_access(actor, organization_id, require_admin=True)
+        return await self._salon_repo.update_staff_working_hours(actor, organization_id, business_id, staff_id, payload)
+
+    async def get_staff_working_hours(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, staff_id: UUID
+    ) -> List[SalonStaffWorkingHoursItem]:
+        await self._verify_org_access(actor, organization_id, require_admin=False)
+        return await self._salon_repo.get_staff_working_hours(actor, organization_id, business_id, staff_id)
+
+    async def add_staff_break(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, staff_id: UUID, payload: SalonStaffBreakCreateRequest
+    ) -> SalonStaffBreakResponse:
+        await self._verify_org_access(actor, organization_id, require_admin=True)
+        return await self._salon_repo.add_staff_break(actor, organization_id, business_id, staff_id, payload)
+
+    async def list_staff_breaks(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, staff_id: UUID
+    ) -> List[SalonStaffBreakResponse]:
+        await self._verify_org_access(actor, organization_id, require_admin=False)
+        return await self._salon_repo.list_staff_breaks(actor, organization_id, business_id, staff_id)
+
+    async def delete_staff_break(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, staff_id: UUID, break_id: UUID
+    ) -> None:
+        await self._verify_org_access(actor, organization_id, require_admin=True)
+        await self._salon_repo.delete_staff_break(actor, organization_id, business_id, staff_id, break_id)
+
+    async def create_holiday(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, payload: SalonHolidayCreateRequest
+    ) -> SalonHolidayResponse:
+        await self._verify_org_access(actor, organization_id, require_admin=True)
+        return await self._salon_repo.create_holiday(actor, organization_id, business_id, payload)
+
+    async def list_holidays(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, start_date: Optional[date] = None, end_date: Optional[date] = None
+    ) -> List[SalonHolidayResponse]:
+        await self._verify_org_access(actor, organization_id, require_admin=False)
+        return await self._salon_repo.list_holidays(actor, organization_id, business_id, start_date, end_date)
+
+    async def delete_holiday(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, holiday_id: UUID
+    ) -> None:
+        await self._verify_org_access(actor, organization_id, require_admin=True)
+        await self._salon_repo.delete_holiday(actor, organization_id, business_id, holiday_id)
+
+    # =========================================================================
+    # D. APPOINTMENT AVAILABILITY ENGINE
+    # =========================================================================
+    async def get_salon_availability(
+        self,
+        actor: AuthenticatedUser,
+        organization_id: UUID,
+        business_id: UUID,
+        service_id: UUID,
+        requested_date: date,
+        staff_id: Optional[UUID] = None,
+    ) -> SalonAvailabilityResponse:
+        """Compute all non-conflicting bookable slots for a service and date."""
+        await self._verify_org_access(actor, organization_id, require_admin=False)
+        service = await self._salon_repo.get_service(actor, organization_id, business_id, service_id)
+        if not service.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Salon service '{service.name}' is currently inactive and cannot be booked.",
+            )
+
+        tz_str = await self._resolve_business_timezone(actor, organization_id, business_id)
+        try:
+            tz = ZoneInfo(tz_str)
+        except ZoneInfoNotFoundError:
+            tz = timezone.utc
+
+        # 1. Check business opening hours for this weekday (Python weekday: 0=Mon..6=Sun; convert to Svario 0=Sun..6=Sat)
+        py_weekday = requested_date.weekday()
+        svario_weekday = (py_weekday + 1) % 7
+
+        biz_hours_resp = await self._onboarding_repo.get_business_hours(actor, organization_id, business_id)
+        matching_hours = next((h for h in biz_hours_resp.schedule if h.weekday == svario_weekday), None)
+        if matching_hours is None or matching_hours.is_closed or not matching_hours.opens_at or not matching_hours.closes_at:
+            return SalonAvailabilityResponse(
+                organization_id=organization_id,
+                business_id=business_id,
+                service_id=service.id,
+                service_name=service.name,
+                duration_minutes=service.duration_minutes,
+                price=service.price,
+                currency=service.currency,
+                requested_date=requested_date,
+                timezone=tz_str,
+                is_business_closed=True,
+                closure_reason="Salon is closed on this day of the week according to regular operating hours.",
+                available_slots=[],
+            )
+
+        biz_open_min = parse_hhmm_to_minutes(matching_hours.opens_at)
+        biz_close_min = parse_hhmm_to_minutes(matching_hours.closes_at)
+
+        # 2. Check whole-salon holidays/closures for this date
+        holidays = await self._salon_repo.list_holidays(actor, organization_id, business_id, start_date=requested_date, end_date=requested_date)
+        salon_closure = next((h for h in holidays if h.staff_id is None and h.is_closed_all_day), None)
+        if salon_closure:
+            return SalonAvailabilityResponse(
+                organization_id=organization_id,
+                business_id=business_id,
+                service_id=service.id,
+                service_name=service.name,
+                duration_minutes=service.duration_minutes,
+                price=service.price,
+                currency=service.currency,
+                requested_date=requested_date,
+                timezone=tz_str,
+                is_business_closed=True,
+                closure_reason=f"Salon is closed for holiday: {salon_closure.title}",
+                available_slots=[],
+            )
+
+        partial_salon_closures = [
+            (parse_hhmm_to_minutes(h.start_time), parse_hhmm_to_minutes(h.end_time))
+            for h in holidays
+            if h.staff_id is None and not h.is_closed_all_day and h.start_time and h.end_time
+        ]
+
+        # 3. Resolve qualified staff
+        qualified_staff: List[SalonStaffResponse] = []
+        if staff_id is not None:
+            st = await self._salon_repo.get_staff(actor, organization_id, business_id, staff_id)
+            if not st.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Staff member '{st.full_name}' is currently inactive.",
+                )
+            if service.id not in st.assigned_service_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Staff member '{st.full_name}' is not qualified/assigned for service '{service.name}'.",
+                )
+            qualified_staff.append(st)
+        else:
+            all_staff = await self._salon_repo.list_staff(actor, organization_id, business_id, service_id=service.id, is_active=True)
+            qualified_staff.extend(all_staff)
+
+        # 4. Fetch existing active appointments for this date
+        existing_appointments = await self._salon_repo.list_appointments(
+            actor, organization_id, business_id, appointment_date=requested_date
+        )
+        active_appts = [
+            a for a in existing_appointments
+            if a.status in {SalonAppointmentStatus.CONFIRMED, SalonAppointmentStatus.RESCHEDULED}
+        ]
+
+        # 5. Compute available slots
+        available_slots: List[SalonAvailabilitySlot] = []
+        slot_step_minutes = 15
+        duration = service.duration_minutes
+
+        for staff in qualified_staff:
+            # Check staff leave/holiday
+            staff_leave = next((h for h in holidays if h.staff_id == staff.id and h.is_closed_all_day), None)
+            if staff_leave:
+                continue
+
+            # Check staff working hours for this weekday
+            wh_item = next((wh for wh in staff.working_hours if wh.weekday == svario_weekday), None)
+            if not wh_item or wh_item.is_off or not wh_item.start_time or not wh_item.end_time:
+                continue
+
+            staff_start_min = max(biz_open_min, parse_hhmm_to_minutes(wh_item.start_time))
+            staff_end_min = min(biz_close_min, parse_hhmm_to_minutes(wh_item.end_time))
+            if staff_start_min + duration > staff_end_min:
+                continue
+
+            # Gather breaks for this staff member (recurring or date-specific)
+            staff_breaks_min: List[Tuple[int, int]] = []
+            for brk in staff.breaks:
+                if (brk.weekday is not None and brk.weekday == svario_weekday) or (brk.specific_date == requested_date):
+                    staff_breaks_min.append((parse_hhmm_to_minutes(brk.start_time), parse_hhmm_to_minutes(brk.end_time)))
+
+            # Staff-specific partial leaves
+            for h in holidays:
+                if h.staff_id == staff.id and not h.is_closed_all_day and h.start_time and h.end_time:
+                    staff_breaks_min.append((parse_hhmm_to_minutes(h.start_time), parse_hhmm_to_minutes(h.end_time)))
+
+            # Existing appointments for this staff
+            staff_appts_min: List[Tuple[int, int]] = [
+                (parse_hhmm_to_minutes(a.start_time), parse_hhmm_to_minutes(a.end_time))
+                for a in active_appts
+                if a.staff_id == staff.id
+            ]
+
+            # Slide slots
+            current_start_min = staff_start_min
+            while current_start_min + duration <= staff_end_min:
+                candidate_start = current_start_min
+                candidate_end = current_start_min + duration
+
+                # Check conflict with partial salon closures
+                conflict = any(max(candidate_start, c_s) < min(candidate_end, c_e) for c_s, c_e in partial_salon_closures)
+                if not conflict:
+                    # Check conflict with staff breaks
+                    conflict = any(max(candidate_start, b_s) < min(candidate_end, b_e) for b_s, b_e in staff_breaks_min)
+                if not conflict:
+                    # Check conflict with existing appointments
+                    conflict = any(max(candidate_start, a_s) < min(candidate_end, a_e) for a_s, a_e in staff_appts_min)
+
+                if not conflict:
+                    start_str = format_minutes_to_hhmm(candidate_start)
+                    end_str = format_minutes_to_hhmm(candidate_end)
+
+                    start_dt = datetime.combine(
+                        requested_date,
+                        time(candidate_start // 60, candidate_start % 60),
+                        tzinfo=tz,
+                    )
+                    end_dt = datetime.combine(
+                        requested_date,
+                        time(candidate_end // 60, candidate_end % 60),
+                        tzinfo=tz,
+                    )
+
+                    available_slots.append(
+                        SalonAvailabilitySlot(
+                            start_time=start_str,
+                            end_time=end_str,
+                            start_at=start_dt,
+                            end_at=end_dt,
+                            staff_id=staff.id,
+                            staff_name=staff.full_name,
+                            staff_role=staff.role_designation,
+                        )
+                    )
+
+                current_start_min += slot_step_minutes
+
+        available_slots.sort(key=lambda s: (s.start_time, s.staff_name))
+
+        return SalonAvailabilityResponse(
+            organization_id=organization_id,
+            business_id=business_id,
+            service_id=service.id,
+            service_name=service.name,
+            duration_minutes=service.duration_minutes,
+            price=service.price,
+            currency=service.currency,
+            requested_date=requested_date,
+            timezone=tz_str,
+            is_business_closed=False,
+            closure_reason=None,
+            available_slots=available_slots,
+        )
+
+    # =========================================================================
+    # E. APPOINTMENT MANAGEMENT
+    # =========================================================================
+    async def create_appointment(
+        self,
+        actor: AuthenticatedUser,
+        organization_id: UUID,
+        business_id: UUID,
+        payload: SalonAppointmentCreateRequest,
+    ) -> SalonAppointmentResponse:
+        """Create a salon appointment with concurrency protection, auto-staff selection, and idempotency."""
+        await self._verify_org_access(actor, organization_id, require_admin=False)
+
+        # 1. Idempotency Check
+        if payload.idempotency_key:
+            existing = await self._salon_repo.get_appointment_by_idempotency_key(
+                actor, organization_id, business_id, payload.idempotency_key
+            )
+            if existing:
+                return existing
+
+        # 2. Service Verification
+        service = await self._salon_repo.get_service(actor, organization_id, business_id, payload.service_id)
+        if not service.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Service '{service.name}' is inactive and cannot be booked.",
+            )
+
+        # 3. Staff Selection & Availability Verification
+        selected_staff_id = payload.staff_id
+        if selected_staff_id is None:
+            # Auto-assign: find available staff for this service at the requested start time
+            avail = await self.get_salon_availability(
+                actor, organization_id, business_id, service.id, payload.appointment_date
+            )
+            matching_slot = next(
+                (s for s in avail.available_slots if s.start_time == payload.start_time),
+                None,
+            )
+            if not matching_slot:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"No qualified stylist is available for '{service.name}' at {payload.start_time} on {payload.appointment_date}.",
+                )
+            selected_staff_id = matching_slot.staff_id
+            staff = await self._salon_repo.get_staff(actor, organization_id, business_id, selected_staff_id)
+        else:
+            staff = await self._salon_repo.get_staff(actor, organization_id, business_id, selected_staff_id)
+            if not staff.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Staff member '{staff.full_name}' is currently inactive.",
+                )
+            if service.id not in staff.assigned_service_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Staff member '{staff.full_name}' is not assigned to service '{service.name}'.",
+                )
+            # Verify specific staff availability
+            avail = await self.get_salon_availability(
+                actor, organization_id, business_id, service.id, payload.appointment_date, staff_id=staff.id
+            )
+            is_avail = any(s.start_time == payload.start_time for s in avail.available_slots)
+            if not is_avail:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"{staff.full_name} is not available for '{service.name}' at {payload.start_time} on {payload.appointment_date}.",
+                )
+
+        # 4. Calculate Timestamps in Business Timezone
+        tz_str = await self._resolve_business_timezone(actor, organization_id, business_id)
+        try:
+            tz = ZoneInfo(tz_str)
+        except ZoneInfoNotFoundError:
+            tz = timezone.utc
+
+        start_min = parse_hhmm_to_minutes(payload.start_time)
+        end_min = start_min + service.duration_minutes
+        end_time_str = format_minutes_to_hhmm(end_min)
+
+        start_at = datetime.combine(
+            payload.appointment_date,
+            time(start_min // 60, start_min % 60),
+            tzinfo=tz,
+        )
+        end_at = datetime.combine(
+            payload.appointment_date,
+            time(end_min // 60, end_min % 60),
+            tzinfo=tz,
+        )
+
+        booking_ref = f"SV-SAL-{uuid4().hex[:8].upper()}"
+        now = datetime.now(timezone.utc)
+
+        appt_record = SalonAppointmentResponse(
+            id=uuid4(),
+            organization_id=organization_id,
+            business_id=business_id,
+            booking_reference=booking_ref,
+            idempotency_key=payload.idempotency_key,
+            service_id=service.id,
+            service_name=service.name,
+            service_duration_minutes=service.duration_minutes,
+            service_price=service.price,
+            service_currency=service.currency,
+            staff_id=staff.id,
+            staff_name=staff.full_name,
+            staff_role=staff.role_designation,
+            customer_name=payload.customer_name,
+            customer_phone=payload.customer_phone,
+            customer_email=payload.customer_email,
+            notes=payload.notes,
+            appointment_date=payload.appointment_date,
+            start_time=payload.start_time,
+            end_time=end_time_str,
+            start_at=start_at,
+            end_at=end_at,
+            timezone=tz_str,
+            status=SalonAppointmentStatus.CONFIRMED,
+            source=payload.source,
+            cancelled_at=None,
+            cancellation_reason=None,
+            created_at=now,
+            updated_at=now,
+        )
+
+        created = await self._salon_repo.create_appointment(actor, organization_id, business_id, appt_record)
+        return created
+
+    async def get_appointment(
+        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, appointment_id: UUID
+    ) -> SalonAppointmentResponse:
+        await self._verify_org_access(actor, organization_id, require_admin=False)
+        return await self._salon_repo.get_appointment(actor, organization_id, business_id, appointment_id)
+
+    async def list_appointments(
+        self,
+        actor: AuthenticatedUser,
+        organization_id: UUID,
+        business_id: UUID,
+        appointment_date: Optional[date] = None,
+        staff_id: Optional[UUID] = None,
+        status: Optional[SalonAppointmentStatus] = None,
+    ) -> List[SalonAppointmentResponse]:
+        await self._verify_org_access(actor, organization_id, require_admin=False)
+        return await self._salon_repo.list_appointments(
+            actor, organization_id, business_id, appointment_date, staff_id, status
+        )
+
+    async def reschedule_appointment(
+        self,
+        actor: AuthenticatedUser,
+        organization_id: UUID,
+        business_id: UUID,
+        appointment_id: UUID,
+        payload: SalonAppointmentRescheduleRequest,
+    ) -> SalonAppointmentResponse:
+        """Reschedule an existing confirmed appointment with concurrency protection."""
+        await self._verify_org_access(actor, organization_id, require_admin=False)
+        existing = await self._salon_repo.get_appointment(actor, organization_id, business_id, appointment_id)
+        if existing.status not in {SalonAppointmentStatus.CONFIRMED, SalonAppointmentStatus.RESCHEDULED}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot reschedule an appointment in '{existing.status.value}' status.",
+            )
+
+        # Check idempotency if key matches
+        if payload.idempotency_key and existing.idempotency_key == payload.idempotency_key:
+            return existing
+
+        target_staff_id = payload.staff_id or existing.staff_id
+        staff = await self._salon_repo.get_staff(actor, organization_id, business_id, target_staff_id)
+        service = await self._salon_repo.get_service(actor, organization_id, business_id, existing.service_id)
+
+        # Verify new slot availability
+        avail = await self.get_salon_availability(
+            actor, organization_id, business_id, service.id, payload.appointment_date, staff_id=staff.id
+        )
+        is_avail = any(s.start_time == payload.start_time for s in avail.available_slots)
+        if not is_avail:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"{staff.full_name} is not available at {payload.start_time} on {payload.appointment_date}.",
+            )
+
+        tz_str = existing.timezone
+        try:
+            tz = ZoneInfo(tz_str)
+        except ZoneInfoNotFoundError:
+            tz = timezone.utc
+
+        start_min = parse_hhmm_to_minutes(payload.start_time)
+        end_min = start_min + existing.service_duration_minutes
+        end_time_str = format_minutes_to_hhmm(end_min)
+
+        start_at = datetime.combine(
+            payload.appointment_date,
+            time(start_min // 60, start_min % 60),
+            tzinfo=tz,
+        )
+        end_at = datetime.combine(
+            payload.appointment_date,
+            time(end_min // 60, end_min % 60),
+            tzinfo=tz,
+        )
+
+        now = datetime.now(timezone.utc)
+        updated_record = SalonAppointmentResponse(
+            id=existing.id,
+            organization_id=organization_id,
+            business_id=business_id,
+            booking_reference=existing.booking_reference,
+            idempotency_key=payload.idempotency_key or existing.idempotency_key,
+            service_id=existing.service_id,
+            service_name=existing.service_name,
+            service_duration_minutes=existing.service_duration_minutes,
+            service_price=existing.service_price,
+            service_currency=existing.service_currency,
+            staff_id=staff.id,
+            staff_name=staff.full_name,
+            staff_role=staff.role_designation,
+            customer_name=existing.customer_name,
+            customer_phone=existing.customer_phone,
+            customer_email=existing.customer_email,
+            notes=payload.notes if payload.notes is not None else existing.notes,
+            appointment_date=payload.appointment_date,
+            start_time=payload.start_time,
+            end_time=end_time_str,
+            start_at=start_at,
+            end_at=end_at,
+            timezone=tz_str,
+            status=SalonAppointmentStatus.RESCHEDULED,
+            source=existing.source,
+            cancelled_at=None,
+            cancellation_reason=None,
+            created_at=existing.created_at,
+            updated_at=now,
+        )
+
+        return await self._salon_repo.update_appointment(actor, organization_id, business_id, updated_record)
+
+    async def cancel_appointment(
+        self,
+        actor: AuthenticatedUser,
+        organization_id: UUID,
+        business_id: UUID,
+        appointment_id: UUID,
+        payload: SalonAppointmentCancelRequest,
+    ) -> SalonAppointmentResponse:
+        """Cancel a salon appointment."""
+        await self._verify_org_access(actor, organization_id, require_admin=False)
+        existing = await self._salon_repo.get_appointment(actor, organization_id, business_id, appointment_id)
+        if existing.status == SalonAppointmentStatus.CANCELLED:
+            return existing
+
+        now = datetime.now(timezone.utc)
+        cancelled_record = SalonAppointmentResponse(
+            id=existing.id,
+            organization_id=organization_id,
+            business_id=business_id,
+            booking_reference=existing.booking_reference,
+            idempotency_key=existing.idempotency_key,
+            service_id=existing.service_id,
+            service_name=existing.service_name,
+            service_duration_minutes=existing.service_duration_minutes,
+            service_price=existing.service_price,
+            service_currency=existing.service_currency,
+            staff_id=existing.staff_id,
+            staff_name=existing.staff_name,
+            staff_role=existing.staff_role,
+            customer_name=existing.customer_name,
+            customer_phone=existing.customer_phone,
+            customer_email=existing.customer_email,
+            notes=existing.notes,
+            appointment_date=existing.appointment_date,
+            start_time=existing.start_time,
+            end_time=existing.end_time,
+            start_at=existing.start_at,
+            end_at=existing.end_at,
+            timezone=existing.timezone,
+            status=SalonAppointmentStatus.CANCELLED,
+            source=existing.source,
+            cancelled_at=now,
+            cancellation_reason=payload.cancellation_reason or "Customer requested cancellation.",
+            created_at=existing.created_at,
+            updated_at=now,
+        )
+
+        return await self._salon_repo.update_appointment(actor, organization_id, business_id, cancelled_record)
+
+
+_in_memory_service_instance: Optional[SalonWorkflowService] = None
+
+
+def get_salon_workflow_service(
+    settings: Settings = Depends(get_settings),
+    onboarding_repo: OnboardingRepositoryProtocol = Depends(get_onboarding_repository),
+) -> SalonWorkflowService:
+    """Dependency provider for SalonWorkflowService."""
+    global _in_memory_service_instance
+    if _in_memory_service_instance is None:
+        salon_repo = get_in_memory_salon_repository()
+        _in_memory_service_instance = SalonWorkflowService(
+            settings=settings,
+            salon_repo=salon_repo,
+            onboarding_repo=onboarding_repo,
+        )
+    return _in_memory_service_instance

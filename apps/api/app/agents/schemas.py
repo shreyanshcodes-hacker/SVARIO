@@ -51,13 +51,20 @@ class SafetyFlag(str, Enum):
 
 
 class AgentToolName(str, Enum):
-    """Approved Stage 4 backend-executed agent tools."""
+    """Approved Stage 4 & Stage 5 backend-executed agent tools."""
 
     GET_BUSINESS_PROFILE = "get_business_profile"
     GET_BUSINESS_HOURS = "get_business_hours"
     SEARCH_BUSINESS_KNOWLEDGE = "search_business_knowledge"
     SAVE_CONVERSATION_SUMMARY = "save_conversation_summary"
     REQUEST_HUMAN_ESCALATION = "request_human_escalation"
+    # Stage 5 Salon Workflow Tools
+    GET_SALON_SERVICES = "get_salon_services"
+    GET_SALON_STAFF = "get_salon_staff"
+    CHECK_SALON_AVAILABILITY = "check_salon_availability"
+    CREATE_SALON_APPOINTMENT = "create_salon_appointment"
+    RESCHEDULE_SALON_APPOINTMENT = "reschedule_salon_appointment"
+    CANCEL_SALON_APPOINTMENT = "cancel_salon_appointment"
 
 
 class EscalationUrgency(str, Enum):
@@ -260,6 +267,170 @@ class RequestHumanEscalationToolOutput(BaseModel):
     notification_delivered: bool = False
     customer_message_directive: str
     audit_log_id: Optional[UUID] = None
+
+
+# ============================================================================
+# Stage 5 Salon Workflow Agent Tool Schemas
+# ============================================================================
+
+
+class GetSalonServicesToolInput(BaseModel):
+    """Input for `get_salon_services` tool."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    category: Optional[str] = Field(default=None, max_length=80)
+    is_active: Optional[bool] = Field(default=True)
+
+
+class SalonServiceSummaryItem(BaseModel):
+    service_id: str
+    name: str
+    category: str
+    price: float
+    currency: str
+    duration_minutes: int
+
+
+class GetSalonServicesToolOutput(BaseModel):
+    """Output for `get_salon_services` tool."""
+
+    services: List[SalonServiceSummaryItem]
+    count: int
+    categories: List[str]
+
+
+class GetSalonStaffToolInput(BaseModel):
+    """Input for `get_salon_staff` tool."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    service_id: Optional[str] = Field(default=None)
+
+
+class SalonStaffSummaryItem(BaseModel):
+    staff_id: str
+    name: str
+    role: str
+    assigned_service_names: List[str]
+
+
+class GetSalonStaffToolOutput(BaseModel):
+    """Output for `get_salon_staff` tool."""
+
+    staff: List[SalonStaffSummaryItem]
+    count: int
+
+
+class CheckSalonAvailabilityToolInput(BaseModel):
+    """Input for `check_salon_availability` tool."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    service_id: str = Field(..., description="ID of the salon service (from get_salon_services)")
+    requested_date: str = Field(..., description="Date in YYYY-MM-DD format (e.g. 2026-11-16)")
+    staff_id: Optional[str] = Field(default=None, description="Optional preferred staff ID")
+
+
+class SalonSlotSummaryItem(BaseModel):
+    start_time: str
+    end_time: str
+    staff_id: str
+    staff_name: str
+    staff_role: str
+
+
+class CheckSalonAvailabilityToolOutput(BaseModel):
+    """Output for `check_salon_availability` tool."""
+
+    service_name: str
+    duration_minutes: int
+    requested_date: str
+    timezone: str
+    is_business_closed: bool
+    closure_reason: Optional[str] = None
+    available_slots: List[SalonSlotSummaryItem]
+    total_slots_available: int
+
+
+class CreateSalonAppointmentToolInput(BaseModel):
+    """Input for `create_salon_appointment` tool."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    service_id: str = Field(..., description="ID of the selected salon service")
+    appointment_date: str = Field(..., description="Date in YYYY-MM-DD format")
+    start_time: str = Field(..., description="Start time in HH:MM format (from check_salon_availability)")
+    customer_name: str = Field(..., min_length=2, max_length=120)
+    customer_phone: str = Field(..., min_length=6, max_length=32)
+    customer_email: Optional[str] = Field(default=None, max_length=160)
+    staff_id: Optional[str] = Field(default=None, description="Optional chosen staff ID")
+    notes: Optional[str] = Field(default=None, max_length=500)
+    idempotency_key: Optional[str] = Field(default=None, max_length=128)
+
+
+class CreateSalonAppointmentToolOutput(BaseModel):
+    """Output for `create_salon_appointment` tool."""
+
+    booking_confirmed: bool
+    booking_reference: str
+    service_name: str
+    staff_name: str
+    appointment_date: str
+    start_time: str
+    end_time: str
+    duration_minutes: int
+    price: float
+    currency: str
+    customer_name: str
+    customer_phone: str
+    timezone: str
+    message: str
+
+
+class RescheduleSalonAppointmentToolInput(BaseModel):
+    """Input for `reschedule_salon_appointment` tool."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    appointment_id: str = Field(..., description="Appointment ID or reference to reschedule")
+    new_date: str = Field(..., description="New date in YYYY-MM-DD format")
+    new_start_time: str = Field(..., description="New start time in HH:MM format")
+    new_staff_id: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class RescheduleSalonAppointmentToolOutput(BaseModel):
+    """Output for `reschedule_salon_appointment` tool."""
+
+    reschedule_confirmed: bool
+    booking_reference: str
+    service_name: str
+    staff_name: str
+    new_date: str
+    new_start_time: str
+    new_end_time: str
+    message: str
+
+
+class CancelSalonAppointmentToolInput(BaseModel):
+    """Input for `cancel_salon_appointment` tool."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    appointment_id: str = Field(..., description="Appointment ID or reference to cancel")
+    cancellation_reason: Optional[str] = Field(default=None, max_length=300)
+
+
+class CancelSalonAppointmentToolOutput(BaseModel):
+    """Output for `cancel_salon_appointment` tool."""
+
+    cancellation_confirmed: bool
+    booking_reference: str
+    service_name: str
+    appointment_date: str
+    start_time: str
+    message: str
 
 
 # ============================================================================

@@ -31,19 +31,28 @@ import type {
 
 export function getApiBaseUrl(): string {
   const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
-  if (configured && configured.length > 0) {
-    const cleanUrl = configured.replace(/\/+$/, "");
+  if (typeof window !== "undefined") {
+    // If configured is an explicit non-local URL (production Render/Vercel)
     if (
-      typeof window !== "undefined" &&
-      window.location.port === "3001" &&
-      cleanUrl.includes(":8000")
+      configured &&
+      configured.length > 0 &&
+      !configured.includes("localhost") &&
+      !configured.includes("127.0.0.1")
     ) {
-      return cleanUrl.replace(":8000", ":8001");
+      return configured.replace(/\/+$/, "");
     }
-    return cleanUrl;
+
+    const isPort3001 = window.location.port === "3001";
+    const apiPort = isPort3001 ? "8001" : "8000";
+    const currentHost = window.location.hostname || "localhost";
+    const currentProtocol = window.location.protocol === "https:" ? "https:" : "http:";
+
+    // Match browser's active host (localhost, 127.0.0.1, or LAN IP) to prevent CORS/loopback resolution issues
+    return `${currentProtocol}//${currentHost}:${apiPort}`;
   }
-  if (typeof window !== "undefined" && window.location.port === "3001") {
-    return "http://localhost:8001";
+
+  if (configured && configured.length > 0) {
+    return configured.replace(/\/+$/, "");
   }
   return "http://localhost:8000";
 }
@@ -520,4 +529,252 @@ export async function executeVoiceToolApi(
   }
 
   return (await response.json()) as VoiceToolExecutionResponseData;
+}
+
+// =============================================================================
+// Stage 5: Salon Workflow Module API Client
+// =============================================================================
+import type {
+  SalonAppointment,
+  SalonAvailabilityResponse,
+  SalonCreateAppointmentPayload,
+  SalonService,
+  SalonServiceCreatePayload,
+  SalonStaff,
+  SalonStaffCreatePayload,
+} from "@/types/salon";
+
+export async function fetchSalonServices(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  isActive?: boolean
+): Promise<SalonService[]> {
+  const query = isActive !== undefined ? `?is_active=${isActive}` : "";
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/v1/organizations/${encodeURIComponent(organizationId)}/salons/${encodeURIComponent(businessId)}/services${query}`,
+    {
+      headers: buildAuthHeaders(accessToken),
+      cache: "no-store",
+    }
+  );
+  if (!response.ok) throw new Error(await parseApiError(response));
+  return (await response.json()) as SalonService[];
+}
+
+export async function createSalonService(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  payload: SalonServiceCreatePayload
+): Promise<SalonService> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/v1/organizations/${encodeURIComponent(organizationId)}/salons/${encodeURIComponent(businessId)}/services`,
+    {
+      method: "POST",
+      headers: buildAuthHeaders(accessToken),
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!response.ok) throw new Error(await parseApiError(response));
+  return (await response.json()) as SalonService;
+}
+
+export async function updateSalonService(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  serviceId: string,
+  payload: Partial<SalonServiceCreatePayload>
+): Promise<SalonService> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/v1/organizations/${encodeURIComponent(organizationId)}/salons/${encodeURIComponent(businessId)}/services/${encodeURIComponent(serviceId)}`,
+    {
+      method: "PATCH",
+      headers: buildAuthHeaders(accessToken),
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!response.ok) throw new Error(await parseApiError(response));
+  return (await response.json()) as SalonService;
+}
+
+export async function deleteSalonService(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  serviceId: string
+): Promise<void> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/v1/organizations/${encodeURIComponent(organizationId)}/salons/${encodeURIComponent(businessId)}/services/${encodeURIComponent(serviceId)}`,
+    {
+      method: "DELETE",
+      headers: buildAuthHeaders(accessToken),
+    }
+  );
+  if (!response.ok) throw new Error(await parseApiError(response));
+}
+
+export async function fetchSalonStaff(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  serviceId?: string,
+  isActive?: boolean
+): Promise<SalonStaff[]> {
+  const params = new URLSearchParams();
+  if (serviceId) params.set("service_id", serviceId);
+  if (isActive !== undefined) params.set("is_active", String(isActive));
+  const query = params.toString() ? `?${params.toString()}` : "";
+
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/v1/organizations/${encodeURIComponent(organizationId)}/salons/${encodeURIComponent(businessId)}/staff${query}`,
+    {
+      headers: buildAuthHeaders(accessToken),
+      cache: "no-store",
+    }
+  );
+  if (!response.ok) throw new Error(await parseApiError(response));
+  return (await response.json()) as SalonStaff[];
+}
+
+export async function createSalonStaff(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  payload: SalonStaffCreatePayload
+): Promise<SalonStaff> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/v1/organizations/${encodeURIComponent(organizationId)}/salons/${encodeURIComponent(businessId)}/staff`,
+    {
+      method: "POST",
+      headers: buildAuthHeaders(accessToken),
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!response.ok) throw new Error(await parseApiError(response));
+  return (await response.json()) as SalonStaff;
+}
+
+export async function assignSalonStaffServices(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  staffId: string,
+  serviceIds: string[]
+): Promise<SalonStaff> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/v1/organizations/${encodeURIComponent(organizationId)}/salons/${encodeURIComponent(businessId)}/staff/${encodeURIComponent(staffId)}/services`,
+    {
+      method: "PUT",
+      headers: buildAuthHeaders(accessToken),
+      body: JSON.stringify({ service_ids: serviceIds }),
+    }
+  );
+  if (!response.ok) throw new Error(await parseApiError(response));
+  return (await response.json()) as SalonStaff;
+}
+
+export async function fetchSalonAvailability(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  serviceId: string,
+  dateStr: string,
+  staffId?: string
+): Promise<SalonAvailabilityResponse> {
+  const params = new URLSearchParams({
+    service_id: serviceId,
+    requested_date: dateStr,
+  });
+  if (staffId) params.set("staff_id", staffId);
+
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/v1/organizations/${encodeURIComponent(organizationId)}/salons/${encodeURIComponent(businessId)}/availability?${params.toString()}`,
+    {
+      headers: buildAuthHeaders(accessToken),
+      cache: "no-store",
+    }
+  );
+  if (!response.ok) throw new Error(await parseApiError(response));
+  return (await response.json()) as SalonAvailabilityResponse;
+}
+
+export async function fetchSalonAppointments(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  dateStr?: string,
+  staffId?: string
+): Promise<SalonAppointment[]> {
+  const params = new URLSearchParams();
+  if (dateStr) params.set("appointment_date", dateStr);
+  if (staffId) params.set("staff_id", staffId);
+  const query = params.toString() ? `?${params.toString()}` : "";
+
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/v1/organizations/${encodeURIComponent(organizationId)}/salons/${encodeURIComponent(businessId)}/appointments${query}`,
+    {
+      headers: buildAuthHeaders(accessToken),
+      cache: "no-store",
+    }
+  );
+  if (!response.ok) throw new Error(await parseApiError(response));
+  return (await response.json()) as SalonAppointment[];
+}
+
+export async function createSalonAppointment(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  payload: SalonCreateAppointmentPayload
+): Promise<SalonAppointment> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/v1/organizations/${encodeURIComponent(organizationId)}/salons/${encodeURIComponent(businessId)}/appointments`,
+    {
+      method: "POST",
+      headers: buildAuthHeaders(accessToken),
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!response.ok) throw new Error(await parseApiError(response));
+  return (await response.json()) as SalonAppointment;
+}
+
+export async function rescheduleSalonAppointment(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  appointmentId: string,
+  payload: { appointment_date: string; start_time: string; notes?: string }
+): Promise<SalonAppointment> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/v1/organizations/${encodeURIComponent(organizationId)}/salons/${encodeURIComponent(businessId)}/appointments/${encodeURIComponent(appointmentId)}/reschedule`,
+    {
+      method: "POST",
+      headers: buildAuthHeaders(accessToken),
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!response.ok) throw new Error(await parseApiError(response));
+  return (await response.json()) as SalonAppointment;
+}
+
+export async function cancelSalonAppointment(
+  accessToken: string,
+  organizationId: string,
+  businessId: string,
+  appointmentId: string,
+  cancellationReason?: string
+): Promise<SalonAppointment> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/api/v1/organizations/${encodeURIComponent(organizationId)}/salons/${encodeURIComponent(businessId)}/appointments/${encodeURIComponent(appointmentId)}/cancel`,
+    {
+      method: "POST",
+      headers: buildAuthHeaders(accessToken),
+      body: JSON.stringify({ cancellation_reason: cancellationReason }),
+    }
+  );
+  if (!response.ok) throw new Error(await parseApiError(response));
+  return (await response.json()) as SalonAppointment;
 }
