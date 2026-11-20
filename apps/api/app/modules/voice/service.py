@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 import httpx
 from fastapi import Depends, HTTPException, status
 from app.agents.context import ConversationContextManager
+from app.agents.industries import get_industry_agent
 from app.agents.instructions import (
     build_realtime_tool_definitions,
     build_stage4_agent_instructions,
@@ -346,9 +347,10 @@ class VoiceSessionService:
                 ),
             )
 
-        # 4. Build safe server-side Stage 4 agent instructions & tool definitions
+        # 4. Build safe server-side agent instructions & industry-filtered tool definitions
         instructions = build_stage4_agent_instructions(bundle)
-        tools = build_realtime_tool_definitions()
+        industry_agent = get_industry_agent(bundle.organization.industry)
+        tools = build_realtime_tool_definitions(allowed_tools=industry_agent.allowed_tools)
         resolved_voice = (
             payload.voice_override.value
             if payload.voice_override is not None

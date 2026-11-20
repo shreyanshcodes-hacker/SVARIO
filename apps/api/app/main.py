@@ -11,6 +11,15 @@ def create_app() -> FastAPI:
     """Instantiate and configure the Svario FastAPI application."""
     settings = get_settings()
 
+    if (
+        settings.svario_env.strip().lower() == "production"
+        and not settings.is_live_supabase_configured
+    ):
+        raise RuntimeError(
+            "Startup aborted: SVARIO_ENV=production requires live Supabase configuration "
+            "(SUPABASE_URL and SUPABASE_ANON_KEY). Ephemeral in-memory storage is forbidden in production."
+        )
+
     application = FastAPI(
         title=settings.api_service_name,
         description=(

@@ -1,7 +1,8 @@
 """Stage 4 Common Base Instructions, Industry Instructions, Multilingual Rules & Tool Definitions."""
 
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List, Optional
 from app.agents.industries import get_industry_agent
+from app.agents.schemas import AgentToolName
 from app.modules.onboarding.schemas import (
     AssistantPersonality,
     AssistantResponseStyle,
@@ -9,6 +10,7 @@ from app.modules.onboarding.schemas import (
     OnboardingBundleResponse,
     WeekdayHoursItem,
 )
+from app.modules.organizations.schemas import OrganizationIndustry
 
 WEEKDAY_NAMES = {
     0: "Sunday",
@@ -85,8 +87,18 @@ def build_stage4_agent_instructions(bundle: OnboardingBundleResponse) -> str:
         assistant.response_style, STYLE_DIRECTIVES[AssistantResponseStyle.BALANCED]
     )
 
+    booking_boundary_rule = (
+        "6. Backend-Confirmed Scheduling Boundary: Only perform appointment booking, rescheduling, or cancellation "
+        "using your approved industry scheduling tools, and NEVER claim an appointment is booked, rescheduled, or "
+        "cancelled unless the backend tool returns a confirmed committed result."
+        if bundle.organization.industry in {OrganizationIndustry.SALON, OrganizationIndustry.CLINIC}
+        else "6. Pre-Booking Industry Boundary: Recognising booking, rescheduling, or cancellation intent does NOT "
+        "create or modify appointments for this industry yet. Collect the caller's preferences without claiming an "
+        "appointment has been booked."
+    )
+
     common_base = (
-        "COMMON SVARIO AGENT OPERATING RULES (STAGE 4):\n"
+        "COMMON SVARIO AGENT OPERATING RULES:\n"
         f"1. Identity & Introduction: You are {assistant.assistant_name}, the AI voice receptionist for "
         f"{profile.display_name} ({bundle.organization.industry.value}). Introduce yourself naturally using "
         f"the configured greeting: \"{assistant.greeting}\".\n"
@@ -101,8 +113,7 @@ def build_stage4_agent_instructions(bundle: OnboardingBundleResponse) -> str:
         "request was recorded until the corresponding backend tool (`save_conversation_summary` or `request_human_escalation`) "
         "returns a confirmed result. Even after `request_human_escalation` succeeds, state clearly that a callback/follow-up "
         "request has been logged for the team—do NOT claim a human staff member has already been contacted live.\n"
-        "6. Stage 4 Booking Boundary: Recognising booking, rescheduling, or cancellation intent does NOT create or modify "
-        "appointments in Stage 4. Collect the caller's preferences without claiming an appointment has been booked."
+        f"{booking_boundary_rule}"
     )
 
     multilingual_rules = (
@@ -155,9 +166,11 @@ def build_stage4_agent_instructions(bundle: OnboardingBundleResponse) -> str:
     return "\n\n".join(sections)
 
 
-def build_realtime_tool_definitions() -> List[Dict[str, Any]]:
-    """Return the OpenAI Realtime API function tool definitions for Stage 4."""
-    return [
+def build_realtime_tool_definitions(
+    allowed_tools: Optional[Iterable[AgentToolName]] = None,
+) -> List[Dict[str, Any]]:
+    """Return OpenAI Realtime API function tool definitions, filtered by allowed_tools when provided."""
+    all_tools: List[Dict[str, Any]] = [
         {
             "type": "function",
             "name": "get_business_profile",
@@ -610,3 +623,7 @@ def build_realtime_tool_definitions() -> List[Dict[str, Any]]:
             },
         },
     ]
+    if allowed_tools is None:
+        return all_tools
+    permitted_names = {tool.value for tool in allowed_tools}
+    return [tool for tool in all_tools if tool.get("name") in permitted_names]

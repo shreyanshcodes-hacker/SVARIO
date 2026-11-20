@@ -21,6 +21,10 @@ from app.modules.clinics.repository import (
     ClinicRepositoryProtocol,
     InMemoryClinicRepository,
 )
+from app.modules.clinics.supabase_repository import (
+    SupabaseRestClinicRepository,
+    set_current_clinic_actor,
+)
 from app.modules.clinics.schemas import (
     ClinicAppointmentCancelRequest,
     ClinicAppointmentCreateRequest,
@@ -68,7 +72,9 @@ class ClinicWorkflowService:
         onboarding_repo: Optional[OnboardingRepositoryProtocol] = None,
         min_lead_time_minutes: int = 0,
     ) -> None:
-        self._clinic_repo: ClinicRepositoryProtocol = clinic_repo or InMemoryClinicRepository()
+        self._clinic_repo: ClinicRepositoryProtocol = clinic_repo or get_clinic_repository(
+            settings=get_settings()
+        )
         settings = get_settings()
         self._org_repo: OrganizationRepositoryProtocol = (
             org_repo or get_organization_repository(settings=settings)
@@ -87,6 +93,7 @@ class ClinicWorkflowService:
         require_admin: bool = False,
     ) -> None:
         """Verify tenant membership, clinic industry, business ownership, and role."""
+        set_current_clinic_actor(actor)
         is_internal_voice = actor.issuer == INTERNAL_VOICE_ISSUER
         if is_internal_voice:
             if require_admin:
@@ -136,17 +143,11 @@ class ClinicWorkflowService:
 
     @staticmethod
     def _get_zoneinfo(tz_name: str):
+        """Resolve DST-aware IANA timezone via ZoneInfo (backed by tzdata)."""
         try:
             return ZoneInfo(tz_name)
         except ZoneInfoNotFoundError:
-            fallbacks = {
-                "Asia/Kolkata": timezone(timedelta(hours=5, minutes=30)),
-                "Asia/Calcutta": timezone(timedelta(hours=5, minutes=30)),
-                "America/New_York": timezone(timedelta(hours=-5)),
-                "America/Los_Angeles": timezone(timedelta(hours=-8)),
-                "Europe/London": timezone.utc,
-            }
-            return fallbacks.get(tz_name, timezone.utc)
+            return timezone.utc
 
     async def _resolve_timezone(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID
@@ -1117,7 +1118,32 @@ class ClinicWorkflowService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
-_clinic_service_singleton: Optional[ClinicWorkflowService] = None
+_in_memory_clinic_repo = InMemoryClinicRepository()
+
+
+def get_in_memory_clinic_repository() -> InMemoryClinicRepository:
+    """Return the shared in-memory clinic repository (explicitly for local dev/tests only)."""
+    return _in_memory_clinic_repo
+
+
+def get_clinic_repository(
+    settings: Settings = Depends(get_settings),
+) -> ClinicRepositoryProtocol:
+    """Resolve the active Clinic repository with fail-closed production enforcement.
+
+    - Live Supabase configured -> SupabaseRestClinicRepository (real PostgreSQL persistence)
+    - Production without live Supabase -> RuntimeError (fail closed; never fall back to memory)
+    - Non-production without live Supabase -> InMemoryClinicRepository
+    """
+    resolved_settings = settings if isinstance(settings, Settings) else get_settings()
+    if resolved_settings.is_live_supabase_configured:
+        return SupabaseRestClinicRepository(settings=resolved_settings)
+    if resolved_settings.svario_env.strip().lower() == "production":
+        raise RuntimeError(
+            "Production environment requires live Supabase database configuration "
+            "(SUPABASE_URL and SUPABASE_ANON_KEY); in-memory clinic repository fallback is forbidden."
+        )
+    return _in_memory_clinic_repo
 
 
 def get_clinic_workflow_service(
@@ -1125,22 +1151,21 @@ def get_clinic_workflow_service(
     org_repo: OrganizationRepositoryProtocol = Depends(get_organization_repository),
     onboarding_repo: OnboardingRepositoryProtocol = Depends(get_onboarding_repository),
 ) -> ClinicWorkflowService:
-    """Return the singleton ClinicWorkflowService instance."""
-    global _clinic_service_singleton
-    if _clinic_service_singleton is None:
-        resolved_org_repo = (
-            get_organization_repository(settings=get_settings())
-            if not hasattr(org_repo, "get_organization_for_member")
-            else org_repo
-        )
-        resolved_onboarding_repo = (
-            get_onboarding_repository(settings=get_settings())
-            if not hasattr(onboarding_repo, "get_member_role")
-            else onboarding_repo
-        )
-        _clinic_service_singleton = ClinicWorkflowService(
-            clinic_repo=InMemoryClinicRepository(),
-            org_repo=resolved_org_repo,
-            onboarding_repo=resolved_onboarding_repo,
-        )
-    return _clinic_service_singleton
+    """Resolve ClinicWorkflowService backed by the environment-appropriate repository."""
+    resolved_settings = settings if isinstance(settings, Settings) else get_settings()
+    clinic_repo = get_clinic_repository(settings=resolved_settings)
+    resolved_org_repo = (
+        get_organization_repository(settings=resolved_settings)
+        if not hasattr(org_repo, "get_organization_for_member")
+        else org_repo
+    )
+    resolved_onboarding_repo = (
+        get_onboarding_repository(settings=resolved_settings)
+        if not hasattr(onboarding_repo, "get_member_role")
+        else onboarding_repo
+    )
+    return ClinicWorkflowService(
+        clinic_repo=clinic_repo,
+        org_repo=resolved_org_repo,
+        onboarding_repo=resolved_onboarding_repo,
+    )
