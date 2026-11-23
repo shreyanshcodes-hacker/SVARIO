@@ -59,7 +59,10 @@ from app.agents.tools import (
 from app.modules.clinics.service import ClinicWorkflowService, get_clinic_workflow_service
 from app.modules.onboarding.schemas import LanguageCode, OnboardingBundleResponse
 from app.modules.organizations.schemas import OrganizationIndustry
-from app.modules.salons.service import SalonWorkflowService, get_salon_workflow_service
+from app.modules.salons.service import (
+    SalonWorkflowService,
+    build_salon_workflow_service,
+)
 from app.modules.voice.rate_limit import VoiceSessionRateLimiter, get_voice_rate_limiter
 
 WEEKDAY_NAMES = {
@@ -103,7 +106,7 @@ class AgentOrchestrator:
         self._response_timeout_seconds = response_timeout_seconds
         self._persist_summaries_enabled = persist_summaries_enabled
         self._model_response_generator = model_response_generator
-        self._salon_service = salon_service or get_salon_workflow_service()
+        self._salon_service = salon_service or build_salon_workflow_service()
         self._clinic_service = clinic_service or get_clinic_workflow_service()
 
     @property

@@ -38,6 +38,7 @@ from app.agents.schemas import (
     SalonStaffSummaryItem,
 )
 from app.core.auth import AuthenticatedUser
+from app.core.internal_voice import create_verified_internal_voice_actor
 from app.modules.onboarding.schemas import OnboardingBundleResponse
 from app.modules.organizations.schemas import OrganizationIndustry
 from app.modules.salons.schemas import (
@@ -50,14 +51,14 @@ from app.modules.salons.service import SalonWorkflowService
 
 
 def _get_system_actor(bundle: OnboardingBundleResponse, actor_user_id: Optional[UUID] = None) -> AuthenticatedUser:
-    """Create a scoped AuthenticatedUser instance representing the voice agent session."""
+    """Create a cryptographically-bound internal voice actor scoped to this verified session bundle."""
     user_id = actor_user_id or bundle.profile.id or bundle.organization.id
-    return AuthenticatedUser(
-        id=user_id,
-        email=bundle.profile.email or "agent@svario.ai",
-        issuer="https://svario.internal/auth/v1",
-        audience="authenticated",
-        raw_token="session-voice-agent-token",
+    return create_verified_internal_voice_actor(
+        organization_id=bundle.organization.id,
+        business_id=bundle.business_id,
+        industry=bundle.organization.industry,
+        user_id=user_id,
+        email=bundle.profile.email,
     )
 
 
@@ -193,6 +194,7 @@ def execute_check_salon_availability(
                 service_id=svc_uuid,
                 requested_date=req_date,
                 staff_id=staff_uuid,
+                business_hours_override=bundle.hours,
             )
         )
     finally:
@@ -270,6 +272,7 @@ def execute_create_salon_appointment(
                 organization_id=bundle.organization.id,
                 business_id=bundle.business_id,
                 payload=create_req,
+                business_hours_override=bundle.hours,
             )
         )
     finally:
@@ -342,6 +345,7 @@ def execute_reschedule_salon_appointment(
                 business_id=bundle.business_id,
                 appointment_id=appt_uuid,
                 payload=reschedule_req,
+                business_hours_override=bundle.hours,
             )
         )
     finally:

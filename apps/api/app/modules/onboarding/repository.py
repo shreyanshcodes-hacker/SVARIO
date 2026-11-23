@@ -14,6 +14,10 @@ import httpx
 from fastapi import HTTPException, status
 from app.core.auth import AuthenticatedUser
 from app.core.config import Settings
+from app.core.internal_voice import (
+    INTERNAL_VOICE_ISSUER,
+    verify_internal_voice_actor,
+)
 from app.modules.onboarding.schemas import (
     AssistantPersonality,
     AssistantResponseStyle,
@@ -720,8 +724,47 @@ class SupabaseRestOnboardingRepository:
     def __init__(self, settings: Settings) -> None:
         self._base_url = (settings.supabase_url or "").rstrip("/")
         self._anon_key = settings.supabase_anon_key or ""
+        self._service_role_key = (
+            settings.supabase_service_role_key.strip()
+            if settings.supabase_service_role_key
+            else None
+        )
 
-    def _headers(self, actor: AuthenticatedUser) -> Dict[str, str]:
+    def _headers(
+        self,
+        actor: AuthenticatedUser,
+        *,
+        allow_internal_voice_read: bool = False,
+        organization_id: Optional[UUID] = None,
+        business_id: Optional[UUID] = None,
+    ) -> Dict[str, str]:
+        if actor.issuer == INTERNAL_VOICE_ISSUER:
+            if not allow_internal_voice_read or organization_id is None or business_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied: internal voice sessions are not permitted on this onboarding operation.",
+                )
+            verify_internal_voice_actor(
+                actor,
+                organization_id=organization_id,
+                business_id=business_id,
+            )
+            if not self._service_role_key:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Voice agent database persistence requires SUPABASE_SERVICE_ROLE_KEY on the server.",
+                )
+            return {
+                "apikey": self._service_role_key,
+                "Authorization": f"Bearer {self._service_role_key}",
+                "Content-Type": "application/json",
+                "Prefer": "return=representation",
+            }
+        if not actor.raw_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authenticated user JWT is required for onboarding database access.",
+            )
         return {
             "apikey": self._anon_key,
             "Authorization": f"Bearer {actor.raw_token}",
@@ -841,8 +884,17 @@ class SupabaseRestOnboardingRepository:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
                 f"{self._base_url}/rest/v1/business_profiles",
-                headers=self._headers(actor),
-                params={"business_id": f"eq.{business_id}", "select": "*"},
+                headers=self._headers(
+                    actor,
+                    allow_internal_voice_read=True,
+                    organization_id=organization_id,
+                    business_id=business_id,
+                ),
+                params={
+                    "organization_id": f"eq.{organization_id}",
+                    "business_id": f"eq.{business_id}",
+                    "select": "*",
+                },
             )
             rows = resp.json() if resp.status_code < 400 else []
             if rows:
@@ -930,8 +982,14 @@ class SupabaseRestOnboardingRepository:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
                 f"{self._base_url}/rest/v1/business_hours",
-                headers=self._headers(actor),
+                headers=self._headers(
+                    actor,
+                    allow_internal_voice_read=True,
+                    organization_id=organization_id,
+                    business_id=business_id,
+                ),
                 params={
+                    "organization_id": f"eq.{organization_id}",
                     "business_id": f"eq.{business_id}",
                     "select": "*",
                     "order": "weekday.asc",

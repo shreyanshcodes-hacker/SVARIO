@@ -11,6 +11,7 @@ Orchestrates:
 
 from __future__ import annotations
 
+import hashlib
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
@@ -18,14 +19,20 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import Depends, HTTPException, status
 from app.core.auth import AuthenticatedUser
 from app.core.config import Settings, get_settings
+from app.core.internal_voice import (
+    INTERNAL_VOICE_ISSUER,
+    verify_internal_voice_actor,
+)
 from app.modules.onboarding.repository import OnboardingRepositoryProtocol
+from app.modules.onboarding.schemas import BusinessHoursResponse
 from app.modules.onboarding.service import get_onboarding_repository
-from app.modules.organizations.schemas import OrganizationRole
+from app.modules.organizations.schemas import OrganizationIndustry, OrganizationRole
 from app.modules.salons.repository import (
     InMemorySalonRepository,
     SalonRepositoryProtocol,
     get_in_memory_salon_repository,
 )
+from app.modules.salons.supabase_repository import SupabaseRestSalonRepository
 from app.modules.salons.schemas import (
     SalonAppointmentCancelRequest,
     SalonAppointmentCreateRequest,
@@ -66,10 +73,20 @@ class SalonWorkflowService:
         self._onboarding_repo = onboarding_repo
 
     async def _verify_org_access(
-        self, actor: AuthenticatedUser, organization_id: UUID, require_admin: bool = False
+        self,
+        actor: AuthenticatedUser,
+        organization_id: UUID,
+        business_id: UUID,
+        require_admin: bool = False,
     ) -> OrganizationRole:
-        """Verify the actor is a member of the organization, optionally requiring owner or admin."""
-        if actor.issuer == "https://svario.internal/auth/v1":
+        """Verify tenant membership, salon industry, internal voice binding, and role."""
+        if actor.issuer == INTERNAL_VOICE_ISSUER:
+            verify_internal_voice_actor(
+                actor,
+                organization_id=organization_id,
+                business_id=business_id,
+                expected_industry=OrganizationIndustry.SALON,
+            )
             if require_admin:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -83,6 +100,14 @@ class SalonWorkflowService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied: you are not a member of this organization.",
             )
+
+        org_detail = await self._onboarding_repo.get_organization_detail(actor, organization_id)
+        if org_detail.industry != OrganizationIndustry.SALON:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Salon workflow operations are only valid for salon organizations.",
+            )
+
         if require_admin and role not in {OrganizationRole.OWNER, OrganizationRole.ADMIN}:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -91,9 +116,16 @@ class SalonWorkflowService:
         return role
 
     async def _resolve_business_timezone(
-        self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID
+        self,
+        actor: AuthenticatedUser,
+        organization_id: UUID,
+        business_id: UUID,
+        *,
+        business_hours_override: Optional[BusinessHoursResponse] = None,
     ) -> str:
         """Retrieve the configured business timezone (defaulting to Asia/Kolkata or UTC)."""
+        if business_hours_override is not None and business_hours_override.timezone:
+            return business_hours_override.timezone
         try:
             hours = await self._onboarding_repo.get_business_hours(actor, organization_id, business_id)
             return hours.timezone or "Asia/Kolkata"
@@ -106,7 +138,7 @@ class SalonWorkflowService:
     async def create_service(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, payload: SalonServiceCreateRequest
     ) -> SalonServiceResponse:
-        await self._verify_org_access(actor, organization_id, require_admin=True)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=True)
         if payload.price <= 0:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -122,19 +154,19 @@ class SalonWorkflowService:
     async def get_service(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, service_id: UUID
     ) -> SalonServiceResponse:
-        await self._verify_org_access(actor, organization_id, require_admin=False)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=False)
         return await self._salon_repo.get_service(actor, organization_id, business_id, service_id)
 
     async def list_services(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, category: Optional[str] = None, is_active: Optional[bool] = None
     ) -> List[SalonServiceResponse]:
-        await self._verify_org_access(actor, organization_id, require_admin=False)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=False)
         return await self._salon_repo.list_services(actor, organization_id, business_id, category, is_active)
 
     async def update_service(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, service_id: UUID, payload: SalonServiceUpdateRequest
     ) -> SalonServiceResponse:
-        await self._verify_org_access(actor, organization_id, require_admin=True)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=True)
         if payload.price is not None and payload.price <= 0:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -150,7 +182,7 @@ class SalonWorkflowService:
     async def delete_service(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, service_id: UUID
     ) -> None:
-        await self._verify_org_access(actor, organization_id, require_admin=True)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=True)
         await self._salon_repo.delete_service(actor, organization_id, business_id, service_id)
 
     # =========================================================================
@@ -159,37 +191,37 @@ class SalonWorkflowService:
     async def create_staff(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, payload: SalonStaffCreateRequest
     ) -> SalonStaffResponse:
-        await self._verify_org_access(actor, organization_id, require_admin=True)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=True)
         return await self._salon_repo.create_staff(actor, organization_id, business_id, payload)
 
     async def get_staff(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, staff_id: UUID
     ) -> SalonStaffResponse:
-        await self._verify_org_access(actor, organization_id, require_admin=False)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=False)
         return await self._salon_repo.get_staff(actor, organization_id, business_id, staff_id)
 
     async def list_staff(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, service_id: Optional[UUID] = None, is_active: Optional[bool] = None
     ) -> List[SalonStaffResponse]:
-        await self._verify_org_access(actor, organization_id, require_admin=False)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=False)
         return await self._salon_repo.list_staff(actor, organization_id, business_id, service_id, is_active)
 
     async def update_staff(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, staff_id: UUID, payload: SalonStaffUpdateRequest
     ) -> SalonStaffResponse:
-        await self._verify_org_access(actor, organization_id, require_admin=True)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=True)
         return await self._salon_repo.update_staff(actor, organization_id, business_id, staff_id, payload)
 
     async def delete_staff(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, staff_id: UUID
     ) -> None:
-        await self._verify_org_access(actor, organization_id, require_admin=True)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=True)
         await self._salon_repo.delete_staff(actor, organization_id, business_id, staff_id)
 
     async def assign_staff_services(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, staff_id: UUID, service_ids: List[UUID]
     ) -> SalonStaffResponse:
-        await self._verify_org_access(actor, organization_id, require_admin=True)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=True)
         return await self._salon_repo.assign_staff_services(actor, organization_id, business_id, staff_id, service_ids)
 
     # =========================================================================
@@ -198,49 +230,49 @@ class SalonWorkflowService:
     async def update_staff_working_hours(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, staff_id: UUID, payload: SalonStaffWorkingHoursUpdateRequest
     ) -> List[SalonStaffWorkingHoursItem]:
-        await self._verify_org_access(actor, organization_id, require_admin=True)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=True)
         return await self._salon_repo.update_staff_working_hours(actor, organization_id, business_id, staff_id, payload)
 
     async def get_staff_working_hours(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, staff_id: UUID
     ) -> List[SalonStaffWorkingHoursItem]:
-        await self._verify_org_access(actor, organization_id, require_admin=False)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=False)
         return await self._salon_repo.get_staff_working_hours(actor, organization_id, business_id, staff_id)
 
     async def add_staff_break(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, staff_id: UUID, payload: SalonStaffBreakCreateRequest
     ) -> SalonStaffBreakResponse:
-        await self._verify_org_access(actor, organization_id, require_admin=True)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=True)
         return await self._salon_repo.add_staff_break(actor, organization_id, business_id, staff_id, payload)
 
     async def list_staff_breaks(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, staff_id: UUID
     ) -> List[SalonStaffBreakResponse]:
-        await self._verify_org_access(actor, organization_id, require_admin=False)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=False)
         return await self._salon_repo.list_staff_breaks(actor, organization_id, business_id, staff_id)
 
     async def delete_staff_break(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, staff_id: UUID, break_id: UUID
     ) -> None:
-        await self._verify_org_access(actor, organization_id, require_admin=True)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=True)
         await self._salon_repo.delete_staff_break(actor, organization_id, business_id, staff_id, break_id)
 
     async def create_holiday(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, payload: SalonHolidayCreateRequest
     ) -> SalonHolidayResponse:
-        await self._verify_org_access(actor, organization_id, require_admin=True)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=True)
         return await self._salon_repo.create_holiday(actor, organization_id, business_id, payload)
 
     async def list_holidays(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, start_date: Optional[date] = None, end_date: Optional[date] = None
     ) -> List[SalonHolidayResponse]:
-        await self._verify_org_access(actor, organization_id, require_admin=False)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=False)
         return await self._salon_repo.list_holidays(actor, organization_id, business_id, start_date, end_date)
 
     async def delete_holiday(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, holiday_id: UUID
     ) -> None:
-        await self._verify_org_access(actor, organization_id, require_admin=True)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=True)
         await self._salon_repo.delete_holiday(actor, organization_id, business_id, holiday_id)
 
     # =========================================================================
@@ -254,9 +286,10 @@ class SalonWorkflowService:
         service_id: UUID,
         requested_date: date,
         staff_id: Optional[UUID] = None,
+        business_hours_override: Optional[BusinessHoursResponse] = None,
     ) -> SalonAvailabilityResponse:
         """Compute all non-conflicting bookable slots for a service and date."""
-        await self._verify_org_access(actor, organization_id, require_admin=False)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=False)
         service = await self._salon_repo.get_service(actor, organization_id, business_id, service_id)
         if not service.is_active:
             raise HTTPException(
@@ -264,7 +297,12 @@ class SalonWorkflowService:
                 detail=f"Salon service '{service.name}' is currently inactive and cannot be booked.",
             )
 
-        tz_str = await self._resolve_business_timezone(actor, organization_id, business_id)
+        tz_str = await self._resolve_business_timezone(
+            actor,
+            organization_id,
+            business_id,
+            business_hours_override=business_hours_override,
+        )
         try:
             tz = ZoneInfo(tz_str)
         except ZoneInfoNotFoundError:
@@ -274,7 +312,11 @@ class SalonWorkflowService:
         py_weekday = requested_date.weekday()
         svario_weekday = (py_weekday + 1) % 7
 
-        biz_hours_resp = await self._onboarding_repo.get_business_hours(actor, organization_id, business_id)
+        biz_hours_resp = (
+            business_hours_override
+            if business_hours_override is not None
+            else await self._onboarding_repo.get_business_hours(actor, organization_id, business_id)
+        )
         matching_hours = next((h for h in biz_hours_resp.schedule if h.weekday == svario_weekday), None)
         if matching_hours is None or matching_hours.is_closed or not matching_hours.opens_at or not matching_hours.closes_at:
             return SalonAvailabilityResponse(
@@ -457,9 +499,11 @@ class SalonWorkflowService:
         organization_id: UUID,
         business_id: UUID,
         payload: SalonAppointmentCreateRequest,
+        *,
+        business_hours_override: Optional[BusinessHoursResponse] = None,
     ) -> SalonAppointmentResponse:
         """Create a salon appointment with concurrency protection, auto-staff selection, and idempotency."""
-        await self._verify_org_access(actor, organization_id, require_admin=False)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=False)
 
         # 1. Idempotency Check
         if payload.idempotency_key:
@@ -482,7 +526,12 @@ class SalonWorkflowService:
         if selected_staff_id is None:
             # Auto-assign: find available staff for this service at the requested start time
             avail = await self.get_salon_availability(
-                actor, organization_id, business_id, service.id, payload.appointment_date
+                actor,
+                organization_id,
+                business_id,
+                service.id,
+                payload.appointment_date,
+                business_hours_override=business_hours_override,
             )
             matching_slot = next(
                 (s for s in avail.available_slots if s.start_time == payload.start_time),
@@ -509,7 +558,13 @@ class SalonWorkflowService:
                 )
             # Verify specific staff availability
             avail = await self.get_salon_availability(
-                actor, organization_id, business_id, service.id, payload.appointment_date, staff_id=staff.id
+                actor,
+                organization_id,
+                business_id,
+                service.id,
+                payload.appointment_date,
+                staff_id=staff.id,
+                business_hours_override=business_hours_override,
             )
             is_avail = any(s.start_time == payload.start_time for s in avail.available_slots)
             if not is_avail:
@@ -519,7 +574,12 @@ class SalonWorkflowService:
                 )
 
         # 4. Calculate Timestamps in Business Timezone
-        tz_str = await self._resolve_business_timezone(actor, organization_id, business_id)
+        tz_str = await self._resolve_business_timezone(
+            actor,
+            organization_id,
+            business_id,
+            business_hours_override=business_hours_override,
+        )
         try:
             tz = ZoneInfo(tz_str)
         except ZoneInfoNotFoundError:
@@ -581,7 +641,7 @@ class SalonWorkflowService:
     async def get_appointment(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID, appointment_id: UUID
     ) -> SalonAppointmentResponse:
-        await self._verify_org_access(actor, organization_id, require_admin=False)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=False)
         return await self._salon_repo.get_appointment(actor, organization_id, business_id, appointment_id)
 
     async def list_appointments(
@@ -593,7 +653,7 @@ class SalonWorkflowService:
         staff_id: Optional[UUID] = None,
         status: Optional[SalonAppointmentStatus] = None,
     ) -> List[SalonAppointmentResponse]:
-        await self._verify_org_access(actor, organization_id, require_admin=False)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=False)
         return await self._salon_repo.list_appointments(
             actor, organization_id, business_id, appointment_date, staff_id, status
         )
@@ -605,9 +665,11 @@ class SalonWorkflowService:
         business_id: UUID,
         appointment_id: UUID,
         payload: SalonAppointmentRescheduleRequest,
+        *,
+        business_hours_override: Optional[BusinessHoursResponse] = None,
     ) -> SalonAppointmentResponse:
         """Reschedule an existing confirmed appointment with concurrency protection."""
-        await self._verify_org_access(actor, organization_id, require_admin=False)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=False)
         existing = await self._salon_repo.get_appointment(actor, organization_id, business_id, appointment_id)
         if existing.status not in {SalonAppointmentStatus.CONFIRMED, SalonAppointmentStatus.RESCHEDULED}:
             raise HTTPException(
@@ -625,7 +687,13 @@ class SalonWorkflowService:
 
         # Verify new slot availability
         avail = await self.get_salon_availability(
-            actor, organization_id, business_id, service.id, payload.appointment_date, staff_id=staff.id
+            actor,
+            organization_id,
+            business_id,
+            service.id,
+            payload.appointment_date,
+            staff_id=staff.id,
+            business_hours_override=business_hours_override,
         )
         is_avail = any(s.start_time == payload.start_time for s in avail.available_slots)
         if not is_avail:
@@ -699,7 +767,7 @@ class SalonWorkflowService:
         payload: SalonAppointmentCancelRequest,
     ) -> SalonAppointmentResponse:
         """Cancel a salon appointment."""
-        await self._verify_org_access(actor, organization_id, require_admin=False)
+        await self._verify_org_access(actor, organization_id, business_id, require_admin=False)
         existing = await self._salon_repo.get_appointment(actor, organization_id, business_id, appointment_id)
         if existing.status == SalonAppointmentStatus.CANCELLED:
             return existing
@@ -740,20 +808,106 @@ class SalonWorkflowService:
         return await self._salon_repo.update_appointment(actor, organization_id, business_id, cancelled_record)
 
 
-_in_memory_service_instance: Optional[SalonWorkflowService] = None
+def get_salon_repository(
+    settings: Optional[Settings] = None,
+) -> SalonRepositoryProtocol:
+    """Resolve the active Salon repository with fail-closed production enforcement.
+
+    - Live Supabase configured -> SupabaseRestSalonRepository (real PostgreSQL persistence)
+    - Production without live Supabase -> RuntimeError (fail closed; never fall back to memory)
+    - Non-production without live Supabase -> InMemorySalonRepository
+    """
+    resolved_settings = settings if isinstance(settings, Settings) else get_settings()
+    if resolved_settings.is_live_supabase_configured:
+        return SupabaseRestSalonRepository(settings=resolved_settings)
+    if resolved_settings.svario_env.strip().lower() == "production":
+        raise RuntimeError(
+            "Production environment requires live Supabase database configuration "
+            "(SUPABASE_URL and SUPABASE_ANON_KEY); in-memory salon repository fallback is forbidden."
+        )
+    return get_in_memory_salon_repository()
+
+
+_salon_service_cache: Dict[tuple[str, str, int], SalonWorkflowService] = {}
+
+
+def clear_salon_service_cache() -> None:
+    """Clear cached SalonWorkflowService instances (used on config reload or test isolation)."""
+    _salon_service_cache.clear()
+
+
+def _settings_fingerprint(settings: Settings) -> str:
+    """Compute a non-reversible SHA-256 fingerprint of Supabase/env settings.
+
+    Prevents stale cached repositories after credential or URL rotation without
+    storing or logging raw secrets in cache keys.
+    """
+    raw = "|".join(
+        [
+            settings.svario_env.strip().lower(),
+            (settings.supabase_url or "").strip(),
+            (settings.supabase_anon_key or "").strip(),
+            (settings.supabase_service_role_key or "").strip(),
+        ]
+    ).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def build_salon_workflow_service(
+    *,
+    settings: Optional[Settings] = None,
+    salon_repo: Optional[SalonRepositoryProtocol] = None,
+    onboarding_repo: Optional[OnboardingRepositoryProtocol] = None,
+) -> SalonWorkflowService:
+    """Pure composition factory for SalonWorkflowService (no FastAPI Depends defaults).
+
+    Safe to call from AgentOrchestrator, background tasks, or FastAPI routes.
+    """
+    resolved_settings = settings if isinstance(settings, Settings) else get_settings()
+    resolved_salon_repo = (
+        salon_repo
+        if salon_repo is not None and hasattr(salon_repo, "list_services")
+        else get_salon_repository(settings=resolved_settings)
+    )
+    resolved_onboarding_repo = (
+        onboarding_repo
+        if onboarding_repo is not None and hasattr(onboarding_repo, "get_member_role")
+        else get_onboarding_repository(settings=resolved_settings)
+    )
+
+    if salon_repo is not None or onboarding_repo is not None:
+        return SalonWorkflowService(
+            settings=resolved_settings,
+            salon_repo=resolved_salon_repo,
+            onboarding_repo=resolved_onboarding_repo,
+        )
+
+    cache_key = (
+        type(resolved_salon_repo).__name__,
+        _settings_fingerprint(resolved_settings),
+        id(resolved_onboarding_repo) if type(resolved_onboarding_repo).__name__.startswith("InMemory") else 0,
+    )
+    cached = _salon_service_cache.get(cache_key)
+    if cached is None:
+        cached = SalonWorkflowService(
+            settings=resolved_settings,
+            salon_repo=resolved_salon_repo,
+            onboarding_repo=resolved_onboarding_repo,
+        )
+        _salon_service_cache[cache_key] = cached
+    return cached
 
 
 def get_salon_workflow_service(
     settings: Settings = Depends(get_settings),
     onboarding_repo: OnboardingRepositoryProtocol = Depends(get_onboarding_repository),
 ) -> SalonWorkflowService:
-    """Dependency provider for SalonWorkflowService."""
-    global _in_memory_service_instance
-    if _in_memory_service_instance is None:
-        salon_repo = get_in_memory_salon_repository()
-        _in_memory_service_instance = SalonWorkflowService(
-            settings=settings,
-            salon_repo=salon_repo,
-            onboarding_repo=onboarding_repo,
-        )
-    return _in_memory_service_instance
+    """FastAPI dependency provider for SalonWorkflowService."""
+    resolved_settings = settings if isinstance(settings, Settings) else get_settings()
+    resolved_onboarding_repo = (
+        onboarding_repo if hasattr(onboarding_repo, "get_member_role") else None
+    )
+    return build_salon_workflow_service(
+        settings=resolved_settings,
+        onboarding_repo=resolved_onboarding_repo,
+    )
