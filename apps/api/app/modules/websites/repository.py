@@ -137,6 +137,8 @@ class BookingWebsiteRepositoryProtocol(Protocol):
 
     async def get_published_by_slug(self, slug: str) -> Optional[Dict[str, Any]]: ...
 
+    async def get_published_tenant_ids(self, slug: str) -> Optional[Tuple[UUID, UUID]]: ...
+
     async def fetch_published_brand_asset_by_slug(
         self, slug: str, asset_type: str
     ) -> Optional[Tuple[bytes, str]]: ...
@@ -248,6 +250,12 @@ class InMemoryBookingWebsiteRepository:
             ):
                 return dict(row)
         return None
+
+    async def get_published_tenant_ids(self, slug: str) -> Optional[Tuple[UUID, UUID]]:
+        row = await self.get_published_by_slug(slug)
+        if row is None:
+            return None
+        return UUID(str(row["organization_id"])), UUID(str(row["business_id"]))
 
     async def fetch_published_brand_asset_by_slug(
         self, slug: str, asset_type: str
@@ -511,6 +519,27 @@ class SupabaseRestBookingWebsiteRepository:
         if not payload or not isinstance(payload, dict):
             return None
         return payload
+
+    async def get_published_tenant_ids(self, slug: str) -> Optional[Tuple[UUID, UUID]]:
+        """Resolve real (organization_id, business_id) strictly server-side using service_role ONLY."""
+        if not self._service_role_key:
+            return None
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{self._base_url}/rest/v1/rpc/get_published_website_tenant_ids",
+                headers={
+                    "apikey": self._service_role_key,
+                    "Authorization": f"Bearer {self._service_role_key}",
+                    "Content-Type": "application/json",
+                },
+                json={"p_slug": slug.strip().lower()},
+            )
+        if resp.status_code >= 400:
+            return None
+        payload = resp.json()
+        if not isinstance(payload, dict) or not payload.get("organization_id") or not payload.get("business_id"):
+            return None
+        return UUID(str(payload["organization_id"])), UUID(str(payload["business_id"]))
 
     async def fetch_published_brand_asset_by_slug(
         self, slug: str, asset_type: str

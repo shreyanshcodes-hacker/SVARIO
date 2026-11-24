@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import secrets
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID, NAMESPACE_URL, uuid5
 from fastapi import Depends, HTTPException, status
 from app.agents.schemas import (
@@ -74,6 +74,7 @@ class _BoundPublicVoiceSession:
     organization_id: UUID
     business_id: UUID
     internal_public_token: str
+    has_persistent_db_access: bool
     expires_at: datetime
 
 
@@ -266,15 +267,46 @@ class PublicWebsiteVoiceBridgeService:
         self._voice_service = voice_service
         self._session_store = session_store or _shared_session_store
 
-    async def _resolve_published_ids(self, slug: str) -> Tuple[UUID, UUID]:
-        """Resolve real tenant UUIDs when available in-memory, or deterministic scoped UUIDs otherwise."""
-        raw = await self._website_service._website_repo.get_published_by_slug(slug)
-        if raw and raw.get("organization_id") and raw.get("business_id"):
-            return UUID(str(raw["organization_id"])), UUID(str(raw["business_id"]))
+    async def _resolve_published_ids(self, slug: str) -> Tuple[UUID, UUID, bool]:
+        """Resolve real (organization_id, business_id) via service_role RPC (or in-memory repo).
+
+        Returns `(org_id, biz_id, has_persistent_db_access)`. Never leaks real UUIDs to the browser.
+        """
+        resolved = await self._website_service._website_repo.get_published_tenant_ids(slug)
+        if resolved is not None:
+            return resolved[0], resolved[1], True
         return (
             uuid5(NAMESPACE_URL, f"svario:public-org:{slug}"),
             uuid5(NAMESPACE_URL, f"svario:public-biz:{slug}"),
+            False,
         )
+
+    @staticmethod
+    def _build_public_services_tool_output(
+        site: PublicBookingWebsiteResponse,
+        arguments: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Build a `get_salon_services` tool output strictly from the verified published catalogue."""
+        category_filter = str((arguments or {}).get("category") or "").strip().lower()
+        items: List[Dict[str, Any]] = []
+        for svc in site.services:
+            if category_filter and (svc.category or "").strip().lower() != category_filter:
+                continue
+            items.append(
+                {
+                    "service_id": str(svc.id),
+                    "name": svc.name,
+                    "category": svc.category or "general",
+                    "description": svc.description,
+                    "price": float(svc.price),
+                    "currency": svc.currency or "INR",
+                    "duration_minutes": int(svc.duration_minutes),
+                }
+            )
+        return {
+            "services": items,
+            "count": len(items),
+        }
 
     async def create_public_voice_session(
         self,
@@ -303,7 +335,7 @@ class PublicWebsiteVoiceBridgeService:
                     detail="Unsupported voice preset.",
                 ) from exc
 
-        org_id, biz_id = await self._resolve_published_ids(site.slug)
+        org_id, biz_id, has_persistent_db_access = await self._resolve_published_ids(site.slug)
         bundle = _build_allowlisted_bundle_from_public_site(
             site, organization_id=org_id, business_id=biz_id
         )
@@ -339,6 +371,7 @@ class PublicWebsiteVoiceBridgeService:
                 organization_id=org_id,
                 business_id=biz_id,
                 internal_public_token=internal_token,
+                has_persistent_db_access=has_persistent_db_access,
                 expires_at=min(token_expires_at, datetime.now(timezone.utc) + timedelta(minutes=10)),
             ),
         )
@@ -397,6 +430,66 @@ class PublicWebsiteVoiceBridgeService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Unsupported receptionist tool.",
             ) from exc
+
+        # Reject any model attempt to inject client-side tenant IDs
+        if {"organization_id", "business_id", "tenant_id"}.intersection(
+            (payload.arguments or {}).keys()
+        ):
+            return VoiceToolExecutionResponse(
+                session_id=payload.session_id,
+                call_id=payload.call_id,
+                tool_name=tool_enum,
+                status="rejected",
+                output={
+                    "error": "forbidden_tenant_override",
+                    "message": "Tool arguments must not override server-resolved salon identity.",
+                },
+                detected_language=LanguageCode("en"),
+            )
+
+        # Service discovery: when backend service-role DB access is unavailable, serve the
+        # verified active catalogue already fetched from Supabase by get_published_booking_website_by_slug.
+        if (
+            tool_enum == AgentToolName.GET_SALON_SERVICES
+            and not bound.has_persistent_db_access
+        ):
+            return VoiceToolExecutionResponse(
+                session_id=payload.session_id,
+                call_id=payload.call_id,
+                tool_name=tool_enum,
+                status="succeeded",
+                output=self._build_public_services_tool_output(site, payload.arguments or {}),
+                detected_language=LanguageCode("en"),
+            )
+
+        # Fail closed truthfully for live staff/availability/booking tools if SUPABASE_SERVICE_ROLE_KEY
+        # is not configured on the backend (never invent slots or claim bookings succeeded).
+        if (
+            tool_enum
+            in {
+                AgentToolName.GET_SALON_STAFF,
+                AgentToolName.CHECK_SALON_AVAILABILITY,
+                AgentToolName.CREATE_SALON_APPOINTMENT,
+                AgentToolName.RESCHEDULE_SALON_APPOINTMENT,
+                AgentToolName.CANCEL_SALON_APPOINTMENT,
+            }
+            and not bound.has_persistent_db_access
+        ):
+            return VoiceToolExecutionResponse(
+                session_id=payload.session_id,
+                call_id=payload.call_id,
+                tool_name=tool_enum,
+                status="error",
+                output={
+                    "error": "public_booking_backend_not_configured",
+                    "message": (
+                        "Real-time stylist availability and online appointment booking require "
+                        "server-side database service-role configuration (SUPABASE_SERVICE_ROLE_KEY). "
+                        "Please contact the salon directly to confirm your appointment."
+                    ),
+                },
+                detected_language=LanguageCode("en"),
+            )
 
         return await self._voice_service.execute_voice_tool(
             actor=None,

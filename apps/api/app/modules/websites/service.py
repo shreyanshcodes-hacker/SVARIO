@@ -519,7 +519,13 @@ class BookingWebsiteService:
 
         services_list: List[Dict[str, Any]] = []
         if bool(row.get("show_services", True)) and self._salon_repo is not None:
-            raw_svcs = getattr(self._salon_repo, "_services", {}).values()
+            raw_map = getattr(self._salon_repo, "_services", {})
+            raw_svcs = []
+            for val in raw_map.values():
+                if isinstance(val, list):
+                    raw_svcs.extend(val)
+                else:
+                    raw_svcs.append(val)
             for s in raw_svcs:
                 if (
                     getattr(s, "business_id", None) == biz_id
