@@ -10,6 +10,7 @@ from app.routes.organizations import router as organizations_router
 from app.routes.root import router as root_router
 from app.routes.salons import router as salons_router
 from app.routes.voice import router as voice_router
+from app.routes.websites import router as websites_router
 
 api_router = APIRouter()
 api_router.include_router(root_router, tags=["Platform"])
@@ -21,5 +22,6 @@ api_router.include_router(onboarding_router)
 api_router.include_router(salons_router)
 api_router.include_router(clinics_router)
 api_router.include_router(voice_router)
+api_router.include_router(websites_router)
 
 __all__ = ["api_router"]

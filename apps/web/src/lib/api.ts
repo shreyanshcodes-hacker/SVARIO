@@ -1094,3 +1094,103 @@ export async function cancelClinicAppointment(
   if (!res.ok) throw new Error(await parseApiError(res));
   return (await res.json()) as ClinicAppointment;
 }
+
+// ============================================================================
+// White-Label Booking Website Engine (Stage 1 Dashboard Foundation)
+// ============================================================================
+
+import type {
+  BookingWebsiteConfig,
+  BookingWebsiteDraftUpdatePayload,
+  BrandAssetUploadResult,
+  SlugAvailabilityResult,
+} from "@/types/website";
+
+function websiteBase(organizationId: string): string {
+  return `${getApiBaseUrl()}/api/v1/organizations/${encodeURIComponent(organizationId)}/booking-website`;
+}
+
+export async function fetchBookingWebsiteConfig(
+  accessToken: string,
+  organizationId: string
+): Promise<BookingWebsiteConfig> {
+  const res = await fetch(websiteBase(organizationId), {
+    method: "GET",
+    headers: buildAuthHeaders(accessToken),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as BookingWebsiteConfig;
+}
+
+export async function saveBookingWebsiteDraft(
+  accessToken: string,
+  organizationId: string,
+  payload: BookingWebsiteDraftUpdatePayload
+): Promise<BookingWebsiteConfig> {
+  const res = await fetch(websiteBase(organizationId), {
+    method: "PUT",
+    headers: buildAuthHeaders(accessToken),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as BookingWebsiteConfig;
+}
+
+export async function checkBookingWebsiteSlug(
+  accessToken: string,
+  organizationId: string,
+  slug: string
+): Promise<SlugAvailabilityResult> {
+  const q = new URLSearchParams({ slug });
+  const res = await fetch(`${websiteBase(organizationId)}/slug-availability?${q.toString()}`, {
+    method: "GET",
+    headers: buildAuthHeaders(accessToken),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as SlugAvailabilityResult;
+}
+
+export async function uploadBookingWebsiteAsset(
+  accessToken: string,
+  organizationId: string,
+  assetType: "logo" | "cover",
+  file: File
+): Promise<BrandAssetUploadResult> {
+  const res = await fetch(`${websiteBase(organizationId)}/assets/${encodeURIComponent(assetType)}`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": file.type || "application/octet-stream",
+    },
+    body: file,
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as BrandAssetUploadResult;
+}
+
+export async function publishBookingWebsite(
+  accessToken: string,
+  organizationId: string
+): Promise<BookingWebsiteConfig> {
+  const res = await fetch(`${websiteBase(organizationId)}/publish`, {
+    method: "POST",
+    headers: buildAuthHeaders(accessToken),
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as BookingWebsiteConfig;
+}
+
+export async function unpublishBookingWebsite(
+  accessToken: string,
+  organizationId: string
+): Promise<BookingWebsiteConfig> {
+  const res = await fetch(`${websiteBase(organizationId)}/unpublish`, {
+    method: "POST",
+    headers: buildAuthHeaders(accessToken),
+  });
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as BookingWebsiteConfig;
+}

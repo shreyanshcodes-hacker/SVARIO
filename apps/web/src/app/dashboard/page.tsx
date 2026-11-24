@@ -144,6 +144,15 @@ export default function DashboardPage(): React.JSX.Element {
           <div className="flex flex-wrap items-center gap-3">
             {activeOrganization && (
               <>
+                {activeOrganization.industry === "salon" && (
+                  <Link
+                    href="/dashboard/booking-website"
+                    data-testid="nav-booking-website-link"
+                    className="rounded-xl border border-emerald-400/50 bg-emerald-500/15 px-3.5 py-1.5 text-xs font-semibold text-emerald-200 transition hover:bg-emerald-500/25"
+                  >
+                    Booking Website
+                  </Link>
+                )}
                 <Link
                   href="/voice-test"
                   className="rounded-xl border border-[#36C6D3]/60 bg-[#36C6D3]/15 px-3.5 py-1.5 text-xs font-semibold text-[#36C6D3] transition hover:bg-[#36C6D3]/25"
