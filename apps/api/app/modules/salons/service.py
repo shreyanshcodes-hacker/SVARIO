@@ -59,6 +59,20 @@ from app.modules.salons.schemas import (
 )
 
 
+_TIMEZONE_ALIASES: Dict[str, str] = {
+    "IST": "Asia/Kolkata",
+    "IND": "Asia/Kolkata",
+    "INDIA": "Asia/Kolkata",
+}
+
+
+def _canonicalize_timezone_name(tz_str: Optional[str]) -> str:
+    cleaned = (tz_str or "").strip()
+    if not cleaned:
+        return "Asia/Kolkata"
+    return _TIMEZONE_ALIASES.get(cleaned.upper(), cleaned)
+
+
 class SalonWorkflowService:
     """Domain service for Salon Workflow management."""
 
@@ -125,10 +139,10 @@ class SalonWorkflowService:
     ) -> str:
         """Retrieve the configured business timezone (defaulting to Asia/Kolkata or UTC)."""
         if business_hours_override is not None and business_hours_override.timezone:
-            return business_hours_override.timezone
+            return _canonicalize_timezone_name(business_hours_override.timezone)
         try:
             hours = await self._onboarding_repo.get_business_hours(actor, organization_id, business_id)
-            return hours.timezone or "Asia/Kolkata"
+            return _canonicalize_timezone_name(hours.timezone)
         except Exception:
             return "Asia/Kolkata"
 

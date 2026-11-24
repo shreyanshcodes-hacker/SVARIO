@@ -29,6 +29,7 @@ from app.agents.instructions import (
 )
 from app.agents.orchestrator import AgentOrchestrator, get_agent_orchestrator
 from app.agents.schemas import (
+    AgentToolName,
     AgentTurnRequest,
     AgentTurnResponse,
     SessionConversationContext,
@@ -367,6 +368,7 @@ class VoiceSessionService:
             "session": {
                 "type": "realtime",
                 "model": model,
+                "output_modalities": ["audio"],
                 "instructions": instructions,
                 "tools": tools,
                 "tool_choice": "auto",
@@ -406,6 +408,18 @@ class VoiceSessionService:
             OrganizationIndustry.CLINIC,
             OrganizationIndustry.HOSPITAL,
         }
+        allowed_tool_set = set(industry_agent.allowed_tools)
+        is_salon = bundle.organization.industry == OrganizationIndustry.SALON
+        salon_workflows_enabled = (
+            is_salon
+            and self._orchestrator.salon_service is not None
+            and AgentToolName.GET_SALON_SERVICES in allowed_tool_set
+        )
+        salon_booking_enabled = (
+            salon_workflows_enabled
+            and AgentToolName.CHECK_SALON_AVAILABILITY in allowed_tool_set
+            and AgentToolName.CREATE_SALON_APPOINTMENT in allowed_tool_set
+        )
         base_url = self._settings.effective_realtime_base_url
 
         return VoiceSessionCreateResponse(
@@ -425,8 +439,8 @@ class VoiceSessionService:
                 barge_in_enabled=True,
                 raw_audio_storage_enabled=False,
                 transcript_storage_enabled=False,
-                appointment_booking_enabled=False,
-                industry_workflows_enabled=False,
+                appointment_booking_enabled=salon_booking_enabled,
+                industry_workflows_enabled=salon_workflows_enabled,
             ),
             assistant_context=SafeVoiceAssistantContext(
                 business_name=bundle.profile.display_name,
@@ -469,6 +483,7 @@ class VoiceSessionService:
             call_id=payload.call_id,
             tool_name=payload.tool_name,
             arguments=payload.arguments,
+            actor=actor,
             actor_user_id=actor.id if actor is not None else None,
             rate_limit_key=rate_key,
             max_requests_per_minute=self._settings.voice_session_rate_limit_per_minute * 3,
@@ -499,6 +514,7 @@ class VoiceSessionService:
             session_id=payload.session_id,
             user_input=payload.user_input,
             preferred_language=payload.preferred_language,
+            actor=actor,
             actor_user_id=actor.id if actor is not None else None,
             rate_limit_key=rate_key,
         )

@@ -62,23 +62,35 @@ def _get_system_actor(bundle: OnboardingBundleResponse, actor_user_id: Optional[
     )
 
 
+def _resolve_salon_actor(
+    bundle: OnboardingBundleResponse,
+    actor: Optional[AuthenticatedUser] = None,
+    actor_user_id: Optional[UUID] = None,
+) -> AuthenticatedUser:
+    """Prefer the verified authenticated member JWT for RLS-enforced persistence; fall back to internal voice actor."""
+    if actor is not None and actor.raw_token:
+        return actor
+    return _get_system_actor(bundle, actor_user_id)
+
+
 def execute_get_salon_services(
     *,
     bundle: OnboardingBundleResponse,
     raw_arguments: Dict[str, Any],
     salon_service: SalonWorkflowService,
+    actor: Optional[AuthenticatedUser] = None,
     actor_user_id: Optional[UUID] = None,
 ) -> GetSalonServicesToolOutput:
     """Execute `get_salon_services` tool synchronously."""
     validated = GetSalonServicesToolInput.model_validate(raw_arguments or {})
-    actor = _get_system_actor(bundle, actor_user_id)
+    resolved_actor = _resolve_salon_actor(bundle, actor=actor, actor_user_id=actor_user_id)
 
     # Run coroutine synchronously inside the worker thread
     loop = asyncio.new_event_loop()
     try:
         services = loop.run_until_complete(
             salon_service.list_services(
-                actor=actor,
+                actor=resolved_actor,
                 organization_id=bundle.organization.id,
                 business_id=bundle.business_id,
                 category=validated.category,
@@ -113,11 +125,12 @@ def execute_get_salon_staff(
     bundle: OnboardingBundleResponse,
     raw_arguments: Dict[str, Any],
     salon_service: SalonWorkflowService,
+    actor: Optional[AuthenticatedUser] = None,
     actor_user_id: Optional[UUID] = None,
 ) -> GetSalonStaffToolOutput:
     """Execute `get_salon_staff` tool synchronously."""
     validated = GetSalonStaffToolInput.model_validate(raw_arguments or {})
-    actor = _get_system_actor(bundle, actor_user_id)
+    resolved_actor = _resolve_salon_actor(bundle, actor=actor, actor_user_id=actor_user_id)
 
     svc_uuid: Optional[UUID] = None
     if validated.service_id:
@@ -130,7 +143,7 @@ def execute_get_salon_staff(
     try:
         staff_list = loop.run_until_complete(
             salon_service.list_staff(
-                actor=actor,
+                actor=resolved_actor,
                 organization_id=bundle.organization.id,
                 business_id=bundle.business_id,
                 service_id=svc_uuid,
@@ -161,11 +174,12 @@ def execute_check_salon_availability(
     bundle: OnboardingBundleResponse,
     raw_arguments: Dict[str, Any],
     salon_service: SalonWorkflowService,
+    actor: Optional[AuthenticatedUser] = None,
     actor_user_id: Optional[UUID] = None,
 ) -> CheckSalonAvailabilityToolOutput:
     """Execute `check_salon_availability` tool synchronously."""
     validated = CheckSalonAvailabilityToolInput.model_validate(raw_arguments or {})
-    actor = _get_system_actor(bundle, actor_user_id)
+    resolved_actor = _resolve_salon_actor(bundle, actor=actor, actor_user_id=actor_user_id)
 
     try:
         svc_uuid = UUID(validated.service_id.strip())
@@ -182,13 +196,15 @@ def execute_check_salon_availability(
         try:
             staff_uuid = UUID(validated.staff_id.strip())
         except ValueError:
-            pass
+            raise ValueError(
+                f"Invalid staff_id format: '{validated.staff_id}'. Must be a valid UUID from get_salon_staff or check_salon_availability."
+            )
 
     loop = asyncio.new_event_loop()
     try:
         avail = loop.run_until_complete(
             salon_service.get_salon_availability(
-                actor=actor,
+                actor=resolved_actor,
                 organization_id=bundle.organization.id,
                 business_id=bundle.business_id,
                 service_id=svc_uuid,
@@ -228,11 +244,12 @@ def execute_create_salon_appointment(
     bundle: OnboardingBundleResponse,
     raw_arguments: Dict[str, Any],
     salon_service: SalonWorkflowService,
+    actor: Optional[AuthenticatedUser] = None,
     actor_user_id: Optional[UUID] = None,
 ) -> CreateSalonAppointmentToolOutput:
     """Execute `create_salon_appointment` tool synchronously."""
     validated = CreateSalonAppointmentToolInput.model_validate(raw_arguments or {})
-    actor = _get_system_actor(bundle, actor_user_id)
+    resolved_actor = _resolve_salon_actor(bundle, actor=actor, actor_user_id=actor_user_id)
 
     try:
         svc_uuid = UUID(validated.service_id.strip())
@@ -249,7 +266,9 @@ def execute_create_salon_appointment(
         try:
             staff_uuid = UUID(validated.staff_id.strip())
         except ValueError:
-            pass
+            raise ValueError(
+                f"Invalid staff_id format: '{validated.staff_id}'. Must be a valid UUID from get_salon_staff or check_salon_availability."
+            )
 
     create_req = SalonAppointmentCreateRequest(
         service_id=svc_uuid,
@@ -268,7 +287,7 @@ def execute_create_salon_appointment(
     try:
         appt = loop.run_until_complete(
             salon_service.create_appointment(
-                actor=actor,
+                actor=resolved_actor,
                 organization_id=bundle.organization.id,
                 business_id=bundle.business_id,
                 payload=create_req,
@@ -306,11 +325,12 @@ def execute_reschedule_salon_appointment(
     bundle: OnboardingBundleResponse,
     raw_arguments: Dict[str, Any],
     salon_service: SalonWorkflowService,
+    actor: Optional[AuthenticatedUser] = None,
     actor_user_id: Optional[UUID] = None,
 ) -> RescheduleSalonAppointmentToolOutput:
     """Execute `reschedule_salon_appointment` tool synchronously."""
     validated = RescheduleSalonAppointmentToolInput.model_validate(raw_arguments or {})
-    actor = _get_system_actor(bundle, actor_user_id)
+    resolved_actor = _resolve_salon_actor(bundle, actor=actor, actor_user_id=actor_user_id)
 
     try:
         appt_uuid = UUID(validated.appointment_id.strip())
@@ -340,7 +360,7 @@ def execute_reschedule_salon_appointment(
     try:
         appt = loop.run_until_complete(
             salon_service.reschedule_appointment(
-                actor=actor,
+                actor=resolved_actor,
                 organization_id=bundle.organization.id,
                 business_id=bundle.business_id,
                 appointment_id=appt_uuid,
@@ -373,11 +393,12 @@ def execute_cancel_salon_appointment(
     bundle: OnboardingBundleResponse,
     raw_arguments: Dict[str, Any],
     salon_service: SalonWorkflowService,
+    actor: Optional[AuthenticatedUser] = None,
     actor_user_id: Optional[UUID] = None,
 ) -> CancelSalonAppointmentToolOutput:
     """Execute `cancel_salon_appointment` tool synchronously."""
     validated = CancelSalonAppointmentToolInput.model_validate(raw_arguments or {})
-    actor = _get_system_actor(bundle, actor_user_id)
+    resolved_actor = _resolve_salon_actor(bundle, actor=actor, actor_user_id=actor_user_id)
 
     try:
         appt_uuid = UUID(validated.appointment_id.strip())
@@ -392,7 +413,7 @@ def execute_cancel_salon_appointment(
     try:
         appt = loop.run_until_complete(
             salon_service.cancel_appointment(
-                actor=actor,
+                actor=resolved_actor,
                 organization_id=bundle.organization.id,
                 business_id=bundle.business_id,
                 appointment_id=appt_uuid,

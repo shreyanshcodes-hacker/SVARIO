@@ -13,10 +13,13 @@ Orchestration Flow:
 """
 
 import asyncio
+import logging
+import time
 from typing import Any, Callable, Coroutine, Dict, List, Optional
 from uuid import UUID
 from fastapi import HTTPException, status
 from pydantic import ValidationError
+from app.core.auth import AuthenticatedUser
 from app.agents.context import (
     ConversationContextManager,
     get_conversation_context_manager,
@@ -81,6 +84,30 @@ ModelResponseGeneratorCallable = Callable[
 ]
 
 
+logger = logging.getLogger("svario.voice.tools")
+
+_PII_ARGUMENT_KEYS = {
+    "customer_name",
+    "customer_phone",
+    "customer_email",
+    "patient_display_name",
+    "patient_contact",
+    "patient_contact_verification",
+    "notes",
+}
+
+
+def _sanitize_arguments_for_log(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a privacy-safe copy of tool arguments for structured observability logs."""
+    safe: Dict[str, Any] = {}
+    for key, val in (arguments or {}).items():
+        if key in _PII_ARGUMENT_KEYS:
+            safe[key] = "[REDACTED]"
+        else:
+            safe[key] = val
+    return safe
+
+
 class AgentOrchestrator:
     """Controlled Stage 4 conversational orchestrator and tool execution engine."""
 
@@ -131,6 +158,7 @@ class AgentOrchestrator:
         bundle: OnboardingBundleResponse,
         session_id: str,
         arguments: Dict[str, Any],
+        actor: Optional[AuthenticatedUser] = None,
         actor_user_id: Optional[UUID] = None,
     ) -> Dict[str, Any]:
         """Validate arguments and execute the specified tool synchronously."""
@@ -186,6 +214,7 @@ class AgentOrchestrator:
                 bundle=bundle,
                 raw_arguments=arguments,
                 salon_service=self._salon_service,
+                actor=actor,
                 actor_user_id=actor_user_id,
             )
             return salon_res.model_dump(mode="json")
@@ -195,6 +224,7 @@ class AgentOrchestrator:
                 bundle=bundle,
                 raw_arguments=arguments,
                 salon_service=self._salon_service,
+                actor=actor,
                 actor_user_id=actor_user_id,
             )
             return salon_res.model_dump(mode="json")
@@ -204,6 +234,7 @@ class AgentOrchestrator:
                 bundle=bundle,
                 raw_arguments=arguments,
                 salon_service=self._salon_service,
+                actor=actor,
                 actor_user_id=actor_user_id,
             )
             return salon_res.model_dump(mode="json")
@@ -213,6 +244,7 @@ class AgentOrchestrator:
                 bundle=bundle,
                 raw_arguments=arguments,
                 salon_service=self._salon_service,
+                actor=actor,
                 actor_user_id=actor_user_id,
             )
             return salon_res.model_dump(mode="json")
@@ -222,6 +254,7 @@ class AgentOrchestrator:
                 bundle=bundle,
                 raw_arguments=arguments,
                 salon_service=self._salon_service,
+                actor=actor,
                 actor_user_id=actor_user_id,
             )
             return salon_res.model_dump(mode="json")
@@ -231,6 +264,7 @@ class AgentOrchestrator:
                 bundle=bundle,
                 raw_arguments=arguments,
                 salon_service=self._salon_service,
+                actor=actor,
                 actor_user_id=actor_user_id,
             )
             return salon_res.model_dump(mode="json")
@@ -335,11 +369,22 @@ class AgentOrchestrator:
         call_id: str,
         tool_name: AgentToolName,
         arguments: Dict[str, Any],
+        actor: Optional[AuthenticatedUser] = None,
         actor_user_id: Optional[UUID] = None,
         rate_limit_key: str = "default",
         max_requests_per_minute: int = 30,
     ) -> VoiceToolExecutionResponse:
         """Validate and execute a Realtime voice function call with strict limits."""
+        started_at = time.perf_counter()
+        safe_args = _sanitize_arguments_for_log(arguments)
+        logger.info(
+            "voice_tool.started session_id=%s call_id=%s tool=%s industry=%s args=%s",
+            session_id,
+            call_id,
+            tool_name.value,
+            bundle.organization.industry.value,
+            safe_args,
+        )
         # 1. Verify session context exists (or initialize for this verified session) & check isolation
         ctx = self._context_manager.get_or_create_context(
             session_id=session_id,
@@ -402,11 +447,20 @@ class AgentOrchestrator:
                     bundle=bundle,
                     session_id=session_id,
                     arguments=arguments,
+                    actor=actor,
                     actor_user_id=actor_user_id,
                 ),
                 timeout=self._tool_timeout_seconds,
             )
         except asyncio.TimeoutError:
+            duration_ms = round((time.perf_counter() - started_at) * 1000, 1)
+            logger.warning(
+                "voice_tool.timeout session_id=%s call_id=%s tool=%s duration_ms=%s",
+                session_id,
+                call_id,
+                tool_name.value,
+                duration_ms,
+            )
             self._context_manager.record_audit_log(
                 organization_id=bundle.organization.id,
                 business_id=bundle.business_id,
@@ -429,6 +483,15 @@ class AgentOrchestrator:
                 detected_language=ctx.detected_language,
             )
         except (ValidationError, ValueError) as exc:
+            duration_ms = round((time.perf_counter() - started_at) * 1000, 1)
+            logger.warning(
+                "voice_tool.rejected session_id=%s call_id=%s tool=%s duration_ms=%s reason=%s",
+                session_id,
+                call_id,
+                tool_name.value,
+                duration_ms,
+                str(exc)[:200],
+            )
             self._context_manager.record_audit_log(
                 organization_id=bundle.organization.id,
                 business_id=bundle.business_id,
@@ -450,7 +513,60 @@ class AgentOrchestrator:
                 },
                 detected_language=ctx.detected_language,
             )
-        except Exception:
+        except HTTPException as exc:
+            duration_ms = round((time.perf_counter() - started_at) * 1000, 1)
+            is_client_rejection = 400 <= exc.status_code < 500
+            tool_status = "rejected" if is_client_rejection else "error"
+            detail_msg = str(exc.detail or "Backend rejected the tool request.")
+            logger.warning(
+                "voice_tool.http_error session_id=%s call_id=%s tool=%s http_status=%s status=%s duration_ms=%s detail=%s",
+                session_id,
+                call_id,
+                tool_name.value,
+                exc.status_code,
+                tool_status,
+                duration_ms,
+                detail_msg[:240],
+            )
+            self._context_manager.record_audit_log(
+                organization_id=bundle.organization.id,
+                business_id=bundle.business_id,
+                session_id=session_id,
+                actor_user_id=actor_user_id,
+                action=f"agent.tool_{tool_status}.{tool_name.value}",
+                target_type="agent_tool",
+                target_id=call_id,
+                metadata={
+                    "tool_name": tool_name.value,
+                    "status": tool_status,
+                    "http_status": exc.status_code,
+                },
+            )
+            return VoiceToolExecutionResponse(
+                session_id=session_id,
+                call_id=call_id,
+                tool_name=tool_name,
+                status=tool_status,
+                output={
+                    "error": f"http_{exc.status_code}",
+                    "message": (
+                        detail_msg
+                        if is_client_rejection
+                        else f"{detail_msg} Do not claim the action succeeded."
+                    ),
+                },
+                detected_language=ctx.detected_language,
+            )
+        except Exception as exc:
+            duration_ms = round((time.perf_counter() - started_at) * 1000, 1)
+            logger.exception(
+                "voice_tool.exception session_id=%s call_id=%s tool=%s duration_ms=%s exc_type=%s",
+                session_id,
+                call_id,
+                tool_name.value,
+                duration_ms,
+                type(exc).__name__,
+            )
             self._context_manager.record_audit_log(
                 organization_id=bundle.organization.id,
                 business_id=bundle.business_id,
@@ -473,10 +589,25 @@ class AgentOrchestrator:
                 detected_language=ctx.detected_language,
             )
 
+        duration_ms = round((time.perf_counter() - started_at) * 1000, 1)
+        logger.info(
+            "voice_tool.succeeded session_id=%s call_id=%s tool=%s duration_ms=%s",
+            session_id,
+            call_id,
+            tool_name.value,
+            duration_ms,
+        )
+
         if tool_name in {
             AgentToolName.GET_BUSINESS_PROFILE,
             AgentToolName.GET_BUSINESS_HOURS,
             AgentToolName.SEARCH_BUSINESS_KNOWLEDGE,
+            AgentToolName.GET_SALON_SERVICES,
+            AgentToolName.GET_SALON_STAFF,
+            AgentToolName.CHECK_SALON_AVAILABILITY,
+            AgentToolName.CREATE_SALON_APPOINTMENT,
+            AgentToolName.RESCHEDULE_SALON_APPOINTMENT,
+            AgentToolName.CANCEL_SALON_APPOINTMENT,
             AgentToolName.GET_CLINIC_INFORMATION,
             AgentToolName.GET_CLINIC_DEPARTMENTS,
             AgentToolName.GET_CLINIC_DOCTORS,
@@ -530,6 +661,7 @@ class AgentOrchestrator:
         session_id: str,
         user_input: str,
         preferred_language: Optional[LanguageCode] = None,
+        actor: Optional[AuthenticatedUser] = None,
         actor_user_id: Optional[UUID] = None,
         rate_limit_key: str = "default",
     ) -> AgentTurnResponse:
@@ -659,6 +791,7 @@ class AgentOrchestrator:
                 call_id=f"call_turn_{ctx.turn_count}_1",
                 tool_name=intent_result.recommended_tool,
                 arguments=tool_args,
+                actor=actor,
                 actor_user_id=actor_user_id,
                 rate_limit_key=rate_limit_key,
             )

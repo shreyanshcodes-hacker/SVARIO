@@ -381,4 +381,81 @@ describe("Stage 4 — Realtime Agent Tool Calling, Escalation UI & Language Sele
     expect(sentPayload.type).toBe("conversation.item.create");
     expect(sentPayload.item.content[0].text).toContain("Hinglish");
   });
+
+  it("handles salon tool execution errors and malformed arguments cleanly while preserving call_id", async () => {
+    const harness = createFakeWebRtcHarness();
+    harness.adapters.executeVoiceTool = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Slot already booked for stylist."));
+    const authCtx = buildMockAuthContext();
+
+    render(
+      <AuthOrganizationContext.Provider value={authCtx}>
+        <VoiceTestView testAdapters={harness.adapters} />
+      </AuthOrganizationContext.Provider>
+    );
+
+    fireEvent.click(screen.getByTestId("start-conversation-button"));
+
+    await waitFor(() => {
+      expect(harness.dataChannels.length).toBe(1);
+    });
+
+    const dc = harness.dataChannels[0];
+
+    // 1. Backend error returned cleanly with original call_id
+    act(() => {
+      dc.onmessage?.({
+        data: JSON.stringify({
+          type: "response.function_call_arguments.done",
+          call_id: "call_salon_err_42",
+          name: "create_salon_appointment",
+          arguments: JSON.stringify({
+            service_id: "svc-1",
+            appointment_date: "2026-11-25",
+            start_time: "16:00",
+            customer_name: "Asha",
+            customer_phone: "9876543210",
+          }),
+        }),
+      } as MessageEvent);
+    });
+
+    await waitFor(() => {
+      expect(dc.send).toHaveBeenCalledTimes(2);
+    });
+
+    const errItem = JSON.parse(dc.send.mock.calls[0][0] as string) as {
+      type: string;
+      item: { call_id: string; output: string };
+    };
+    const errRespCreate = JSON.parse(dc.send.mock.calls[1][0] as string) as {
+      type: string;
+    };
+    expect(errItem.item.call_id).toBe("call_salon_err_42");
+    expect(errItem.item.output).toContain("Slot already booked for stylist.");
+    expect(errItem.item.output).toContain("Do not claim the action succeeded");
+    expect(errRespCreate.type).toBe("response.create");
+
+    // 2. Malformed JSON arguments rejected safely without calling backend
+    act(() => {
+      dc.onmessage?.({
+        data: JSON.stringify({
+          type: "response.function_call_arguments.done",
+          call_id: "call_malformed_99",
+          name: "get_salon_services",
+          arguments: "{bad-json",
+        }),
+      } as MessageEvent);
+    });
+
+    await waitFor(() => {
+      expect(dc.send).toHaveBeenCalledTimes(4);
+    });
+    const malformedItem = JSON.parse(dc.send.mock.calls[2][0] as string) as {
+      item: { call_id: string; output: string };
+    };
+    expect(malformedItem.item.call_id).toBe("call_malformed_99");
+    expect(malformedItem.item.output).toContain("invalid_tool_arguments");
+  });
 });

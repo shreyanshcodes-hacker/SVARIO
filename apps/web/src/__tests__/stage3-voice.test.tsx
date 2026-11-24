@@ -509,4 +509,216 @@ describe("Stage 3 Shared Browser Voice Infrastructure", () => {
     expect(createdPeerConnections[0].close).toHaveBeenCalledTimes(1);
     expect(createdPeerConnections[1].close).not.toHaveBeenCalled();
   });
+
+  it("8. transitions accurately through speech detection, thinking, AI speaking, barge-in, and listening", async () => {
+    const authCtx = buildMockAuthContext();
+    const { stream } = createFakeMediaStream();
+    const fakePc = createFakePeerConnection();
+
+    render(
+      <AuthOrganizationContext.Provider value={authCtx}>
+        <VoiceTestView
+          testAdapters={{
+            getUserMedia: vi.fn().mockResolvedValue(stream),
+            createVoiceSession: vi
+              .fn()
+              .mockResolvedValue(buildSampleSessionResponse()),
+            createPeerConnection: () => fakePc as unknown as RTCPeerConnection,
+            exchangeSdpOffer: vi.fn().mockResolvedValue("v=0\r\na=answer\r\n"),
+          }}
+        />
+      </AuthOrganizationContext.Provider>
+    );
+
+    fireEvent.click(screen.getByTestId("start-conversation-button"));
+
+    await waitFor(() => {
+      expect(fakePc.dataChannel).not.toBeNull();
+    });
+
+    const dc = fakePc.dataChannel!;
+    expect(screen.getByTestId("listening-indicator").textContent).toContain("Listening");
+
+    // 1. User begins speaking -> Listening / speech detected
+    act(() => {
+      dc.onmessage?.({
+        data: JSON.stringify({ type: "input_audio_buffer.speech_started" }),
+      } as MessageEvent);
+    });
+    expect(screen.getByTestId("listening-indicator").textContent).toContain(
+      "Listening / speech detected"
+    );
+
+    // 2. User finishes speaking -> Thinking
+    act(() => {
+      dc.onmessage?.({
+        data: JSON.stringify({ type: "input_audio_buffer.speech_stopped" }),
+      } as MessageEvent);
+    });
+    expect(screen.getByTestId("speaking-indicator").textContent).toContain("Thinking");
+
+    // 3. AI starts generating/playing audio -> AI Speaking
+    act(() => {
+      dc.onmessage?.({
+        data: JSON.stringify({
+          type: "response.created",
+          response: { id: "resp_001" },
+        }),
+      } as MessageEvent);
+      dc.onmessage?.({
+        data: JSON.stringify({ type: "output_audio_buffer.started" }),
+      } as MessageEvent);
+      dc.onmessage?.({
+        data: JSON.stringify({ type: "response.output_audio.delta" }),
+      } as MessageEvent);
+    });
+    expect(screen.getByTestId("speaking-indicator").textContent).toContain("AI Speaking");
+
+    // 4. Non-fatal response_cancel_not_active error does NOT tear down the session
+    act(() => {
+      dc.onmessage?.({
+        data: JSON.stringify({
+          type: "error",
+          error: {
+            code: "response_cancel_not_active",
+            message: "Cancellation failed: no active response found",
+          },
+        }),
+      } as MessageEvent);
+    });
+    expect(
+      screen.getByTestId("voice-orb-waveform").getAttribute("data-voice-state")
+    ).toBe("speaking");
+
+    // 5. AI finishes playback -> Listening
+    act(() => {
+      dc.onmessage?.({
+        data: JSON.stringify({ type: "output_audio_buffer.stopped" }),
+      } as MessageEvent);
+    });
+    expect(screen.getByTestId("listening-indicator").textContent).toContain("Listening");
+    expect(screen.getByTestId("voice-event-telemetry").textContent).toContain(
+      "output_audio_buffer.stopped"
+    );
+  });
+
+  it("9. surfaces AI response failures as Response Error instead of silently showing Silent", async () => {
+    const authCtx = buildMockAuthContext();
+    const { stream } = createFakeMediaStream();
+    const fakePc = createFakePeerConnection();
+
+    render(
+      <AuthOrganizationContext.Provider value={authCtx}>
+        <VoiceTestView
+          testAdapters={{
+            getUserMedia: vi.fn().mockResolvedValue(stream),
+            createVoiceSession: vi
+              .fn()
+              .mockResolvedValue(buildSampleSessionResponse()),
+            createPeerConnection: () => fakePc as unknown as RTCPeerConnection,
+            exchangeSdpOffer: vi.fn().mockResolvedValue("v=0\r\na=answer\r\n"),
+          }}
+        />
+      </AuthOrganizationContext.Provider>
+    );
+
+    fireEvent.click(screen.getByTestId("start-conversation-button"));
+
+    await waitFor(() => {
+      expect(fakePc.dataChannel).not.toBeNull();
+    });
+
+    const dc = fakePc.dataChannel!;
+    act(() => {
+      dc.onmessage?.({
+        data: JSON.stringify({
+          type: "response.done",
+          response: {
+            id: "resp_failed_01",
+            status: "failed",
+            status_details: {
+              type: "failed",
+              error: {
+                code: "insufficient_quota",
+                message: "You exceeded your current quota.",
+              },
+            },
+          },
+        }),
+      } as MessageEvent);
+    });
+
+    expect(screen.getByTestId("speaking-indicator").textContent).toContain(
+      "Response Error"
+    );
+    expect(screen.getByTestId("voice-response-error-banner").textContent).toContain(
+      "You exceeded your current quota."
+    );
+  });
+
+  it("10. exposes browser autoplay playback failure and recovers via Enable AI Audio button", async () => {
+    const authCtx = buildMockAuthContext();
+    const { stream } = createFakeMediaStream();
+    const fakePc = createFakePeerConnection();
+    const playMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("NotAllowedError: play() failed because user didn't interact"))
+      .mockResolvedValueOnce(undefined);
+    const fakeAudioEl = {
+      autoplay: true,
+      muted: false,
+      volume: 1,
+      srcObject: null as MediaStream | null,
+      play: playMock,
+      pause: vi.fn(),
+      setAttribute: vi.fn(),
+    } as unknown as HTMLAudioElement;
+
+    render(
+      <AuthOrganizationContext.Provider value={authCtx}>
+        <VoiceTestView
+          testAdapters={{
+            getUserMedia: vi.fn().mockResolvedValue(stream),
+            createVoiceSession: vi
+              .fn()
+              .mockResolvedValue(buildSampleSessionResponse()),
+            createPeerConnection: () => fakePc as unknown as RTCPeerConnection,
+            createAudioElement: () => fakeAudioEl,
+            exchangeSdpOffer: vi.fn().mockResolvedValue("v=0\r\na=answer\r\n"),
+          }}
+        />
+      </AuthOrganizationContext.Provider>
+    );
+
+    fireEvent.click(screen.getByTestId("start-conversation-button"));
+
+    await waitFor(() => {
+      expect(fakePc.ontrack).not.toBeNull();
+    });
+
+    // Simulate incoming remote AI audio track -> autoplay rejected
+    await act(async () => {
+      fakePc.ontrack?.({
+        streams: [stream],
+      } as unknown as RTCTrackEvent);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("voice-playback-warning-banner")).toBeDefined();
+    });
+    expect(screen.getByTestId("remote-playback-status").textContent).toContain(
+      "Autoplay Blocked"
+    );
+
+    // Click user-initiated recovery button -> play() succeeds and warning disappears
+    fireEvent.click(screen.getByTestId("resume-playback-button"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("voice-playback-warning-banner")).toBeNull();
+    });
+    expect(playMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("remote-playback-status").textContent).toContain(
+      "Active"
+    );
+  });
 });

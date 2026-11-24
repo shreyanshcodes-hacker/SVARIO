@@ -1,6 +1,8 @@
 """Stage 5 Salon Industry Agent (`OrganizationIndustry.SALON`)."""
 
+from datetime import datetime, timezone
 from typing import List
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.agents.base import BaseIndustryAgent
 from app.agents.schemas import AgentToolName
 from app.modules.onboarding.schemas import OnboardingBundleResponse
@@ -37,20 +39,30 @@ class SalonAgent(BaseIndustryAgent):
 
     def build_industry_directives(self, bundle: OnboardingBundleResponse) -> str:
         business_name = bundle.profile.display_name
+        raw_tz = (bundle.profile.timezone or "Asia/Kolkata").strip()
+        tz_name = {"IST": "Asia/Kolkata", "IND": "Asia/Kolkata"}.get(raw_tz.upper(), raw_tz)
+        try:
+            now_local = datetime.now(ZoneInfo(tz_name))
+        except ZoneInfoNotFoundError:
+            tz_name = "UTC"
+            now_local = datetime.now(timezone.utc)
+        today_str = now_local.strftime("%Y-%m-%d (%A)")
+
         return (
             f"SALON INDUSTRY INSTRUCTIONS ({business_name}):\n"
-            "- Help callers with general salon information, location, operating hours, and active services.\n"
-            "- To inspect treatments, pricing, and durations, call `get_salon_services`.\n"
-            "- To view qualified stylists or specialists, call `get_salon_staff`.\n"
-            "- When a customer wants to book an appointment (e.g. 'I want a haircut tomorrow around 4 PM'):\n"
-            "  1. Identify the requested service (or ask clarifying question if missing).\n"
-            "  2. Check actual real-time availability via `check_salon_availability`.\n"
-            "  3. Quote the available slot(s) and ask the customer for confirmation.\n"
-            "  4. When the customer confirms, call `create_salon_appointment` with customer name and phone.\n"
-            "  5. Confirm the booking ONLY after receiving a successful backend response with the booking reference.\n"
-            "- When a customer wants to reschedule, verify availability and call `reschedule_salon_appointment`.\n"
-            "- When a customer wants to cancel, call `cancel_salon_appointment`.\n"
-            "- Never invent prices, durations, or booking confirmations without backend confirmation."
+            f"- Current Local Date: {today_str} ({tz_name}). Use this date when resolving relative dates such as 'today' or 'tomorrow' into YYYY-MM-DD format.\n"
+            "- Help callers with general salon information, location, operating hours, active services, pricing, durations, and appointments.\n"
+            "- SERVICE & PRICING ENQUIRIES: Whenever a caller asks about services, treatments, pricing, or durations, ALWAYS call `get_salon_services` (and `search_business_knowledge` if they ask about general policies/FAQs). Answer strictly from the returned records (service name, category, price, currency, duration). Never invent service names, prices, durations, or discounts. If no matching service is returned, clearly inform the caller.\n"
+            "- STAFF ENQUIRIES: Call `get_salon_staff` when a caller asks for stylists or has a stylist preference.\n"
+            "- APPOINTMENT BOOKING WORKFLOW (follow every step in order):\n"
+            "  1. Understand the request: identify service, requested date, preferred time, customer name, customer phone, and optional preferred stylist. Ask naturally for any missing details.\n"
+            "  2. Fetch services via `get_salon_services` and resolve the real `service_id`. NEVER fabricate a `service_id`.\n"
+            "  3. Fetch staff via `get_salon_staff` if the caller requests a specific stylist or recommendations.\n"
+            "  4. Check real-time availability via `check_salon_availability` using the real `service_id` and `YYYY-MM-DD` date. Use actual returned slots and `staff_id` values. If the requested slot is unavailable, suggest available alternatives. Never assume a time is available.\n"
+            "  5. Explicit customer confirmation BEFORE booking: clearly repeat the Service, Date, Time, Stylist (if applicable), Price, Customer Name, and Customer Phone, and ask for explicit confirmation. NEVER call `create_salon_appointment` before the customer confirms.\n"
+            "  6. Commit the booking: only after explicit confirmation, call `create_salon_appointment` with the verified `service_id`, `appointment_date`, `start_time`, `customer_name`, `customer_phone`, and optional `staff_id`.\n"
+            "  7. Confirm the result: ONLY when `create_salon_appointment` returns `booking_confirmed: true`, share the real `booking_reference`, service, date, time, stylist, duration, and price. If the backend rejects or fails, explain clearly that the booking was NOT completed.\n"
+            "- RESCHEDULING & CANCELLATION: Identify the existing appointment, check availability via `check_salon_availability` before rescheduling, require explicit customer confirmation before modifying or cancelling, and call `reschedule_salon_appointment` or `cancel_salon_appointment`. Report the actual backend result."
         )
 
     def build_emergency_response(

@@ -166,6 +166,14 @@ class ConversationContextManager:
                 detail="Session context isolation violation.",
             )
 
+        now = datetime.now(timezone.utc)
+        # In live Realtime voice sessions, `start_new_turn()` is not called between spoken turns.
+        # Reset the per-turn tool counter when a new spoken turn begins (>= 2s gap since last tool call)
+        # while still blocking rapid back-to-back runaway tool bursts within a single turn.
+        if (now - ctx.last_updated_at).total_seconds() >= 2.0:
+            ctx.tool_calls_in_current_turn = 0
+            ctx.turn_count += 1
+
         if ctx.tool_calls_in_current_turn >= max_tool_calls_per_turn:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -177,7 +185,7 @@ class ConversationContextManager:
 
         ctx.tool_calls_in_current_turn += 1
         ctx.total_tool_calls += 1
-        ctx.last_updated_at = datetime.now(timezone.utc)
+        ctx.last_updated_at = now
         return ctx
 
     def reset_turn_tool_counter(

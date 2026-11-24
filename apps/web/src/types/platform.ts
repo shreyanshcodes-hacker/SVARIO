@@ -367,7 +367,23 @@ export type AgentToolNameType =
   | "get_business_hours"
   | "search_business_knowledge"
   | "save_conversation_summary"
-  | "request_human_escalation";
+  | "request_human_escalation"
+  | "get_salon_services"
+  | "get_salon_staff"
+  | "check_salon_availability"
+  | "create_salon_appointment"
+  | "reschedule_salon_appointment"
+  | "cancel_salon_appointment"
+  | "get_clinic_information"
+  | "get_clinic_departments"
+  | "get_clinic_specialities"
+  | "get_clinic_doctors"
+  | "get_clinic_consultation_types"
+  | "check_clinic_availability"
+  | "create_clinic_appointment"
+  | "reschedule_clinic_appointment"
+  | "cancel_clinic_appointment"
+  | "request_clinic_human_escalation";
 
 export interface VoiceToolExecutionPayload {
   session_id: string;

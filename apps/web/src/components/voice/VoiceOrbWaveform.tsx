@@ -6,6 +6,8 @@ import type { VoiceSessionState } from "@/lib/voice/types";
 interface VoiceOrbWaveformProps {
   state: VoiceSessionState;
   isMuted: boolean;
+  isUserSpeaking?: boolean;
+  hasResponseError?: boolean;
 }
 
 const STATE_VISUALS: Record<
@@ -90,8 +92,37 @@ const STATE_VISUALS: Record<
   },
 };
 
-export function VoiceOrbWaveform({ state, isMuted }: VoiceOrbWaveformProps) {
+export function VoiceOrbWaveform({
+  state,
+  isMuted,
+  isUserSpeaking = false,
+  hasResponseError = false,
+}: VoiceOrbWaveformProps) {
   const visual = STATE_VISUALS[state];
+  const badgeText =
+    state === "error"
+      ? "ERROR"
+      : hasResponseError
+      ? "RESPONSE ERROR"
+      : isMuted &&
+        (state === "listening" || state === "processing" || state === "connected")
+      ? "PAUSED"
+      : state === "listening" && isUserSpeaking
+      ? "LISTENING / SPEECH DETECTED"
+      : state === "processing"
+      ? "THINKING"
+      : state === "speaking"
+      ? "AI SPEAKING"
+      : visual.badge;
+
+  const subtitleText =
+    hasResponseError && state !== "error"
+      ? "AI response failed — review the error details below and try speaking again"
+      : isMuted && state === "listening"
+      ? "Microphone is muted — unmute to resume listening"
+      : state === "listening" && isUserSpeaking
+      ? "Speech detected — Svario is capturing your voice"
+      : visual.subtitle;
 
   return (
     <div
@@ -147,7 +178,7 @@ export function VoiceOrbWaveform({ state, isMuted }: VoiceOrbWaveformProps) {
                 : "bg-[#A7B0C4]"
             }`}
           />
-          {visual.badge}
+          {badgeText}
         </span>
 
         {isMuted && (
@@ -161,7 +192,7 @@ export function VoiceOrbWaveform({ state, isMuted }: VoiceOrbWaveformProps) {
       </div>
 
       <p className="relative z-10 mt-2 max-w-md text-xs text-[#A7B0C4]">
-        {visual.subtitle}
+        {subtitleText}
       </p>
     </div>
   );

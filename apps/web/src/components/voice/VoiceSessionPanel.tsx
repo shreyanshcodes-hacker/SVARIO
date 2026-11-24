@@ -40,14 +40,30 @@ const INITIAL_SNAPSHOT: VoiceClientSnapshot = {
   state: "idle",
   permissionState: "prompt",
   isMuted: false,
+  isUserSpeaking: false,
   activeSession: null,
   error: null,
+  responseError: null,
   activeResponseId: null,
   expiresAtIso: null,
   events: [],
   preferredLanguage: "en",
   lastToolExecution: null,
   escalationNotice: null,
+  microphoneDiagnostics: {
+    trackAttached: false,
+    trackEnabled: false,
+    trackReadyState: "unknown",
+    trackMutedBySystem: false,
+    inputLevel: 0,
+    hasDetectedAudioActivity: false,
+  },
+  playbackState: {
+    remoteTrackReceived: false,
+    autoplayBlocked: false,
+    isPlaying: false,
+    warningMessage: null,
+  },
 };
 
 export function VoiceSessionPanel({
@@ -138,6 +154,42 @@ export function VoiceSessionPanel({
   const handleSelectLanguage = useCallback((lang: LanguageCodeType) => {
     clientRef.current?.setPreferredLanguage(lang);
   }, []);
+
+  const handleResumePlayback = useCallback(async () => {
+    await clientRef.current?.resumePlayback();
+  }, []);
+
+  const listeningLabel =
+    snapshot.state === "error"
+      ? "Error"
+      : snapshot.isMuted && isSessionActive
+      ? "Paused"
+      : snapshot.state === "listening" && snapshot.isUserSpeaking
+      ? "Listening / speech detected"
+      : snapshot.state === "listening"
+      ? "Listening"
+      : snapshot.state === "processing"
+      ? "Thinking"
+      : snapshot.state === "speaking"
+      ? "AI Speaking"
+      : "Inactive";
+
+  const speakingLabel =
+    snapshot.state === "error"
+      ? "Error"
+      : snapshot.responseError
+      ? "Response Error"
+      : snapshot.state === "speaking"
+      ? "AI Speaking"
+      : snapshot.state === "processing"
+      ? "Thinking"
+      : snapshot.isMuted && isSessionActive
+      ? "Paused"
+      : snapshot.state === "listening" && snapshot.isUserSpeaking
+      ? "Listening / speech detected"
+      : snapshot.state === "listening"
+      ? "Listening"
+      : "Silent";
 
   return (
     <div className="space-y-6 rounded-2xl border border-white/10 bg-[#171D33] p-6 text-[#F5F7FC] shadow-xl">
@@ -274,16 +326,18 @@ export function VoiceSessionPanel({
           </span>
           <span
             className={`mt-1 block text-xs font-semibold ${
-              snapshot.state === "listening"
+              snapshot.state === "error"
+                ? "text-rose-400"
+                : snapshot.isMuted && isSessionActive
+                ? "text-amber-300"
+                : snapshot.state === "listening"
                 ? "text-[#36C6D3]"
+                : snapshot.state === "processing" || snapshot.state === "speaking"
+                ? "text-[#7657F6]"
                 : "text-[#A7B0C4]"
             }`}
           >
-            {snapshot.state === "listening"
-              ? snapshot.isMuted
-                ? "Paused (Muted)"
-                : "Active — Listening"
-              : "Inactive"}
+            {listeningLabel}
           </span>
         </div>
 
@@ -296,41 +350,113 @@ export function VoiceSessionPanel({
           </span>
           <span
             className={`mt-1 block text-xs font-semibold ${
-              snapshot.state === "speaking"
+              snapshot.state === "error" || snapshot.responseError
+                ? "text-rose-400"
+                : snapshot.state === "speaking" || snapshot.state === "processing"
                 ? "text-[#7657F6]"
+                : snapshot.isMuted && isSessionActive
+                ? "text-amber-300"
+                : snapshot.state === "listening"
+                ? "text-[#36C6D3]"
                 : "text-[#A7B0C4]"
             }`}
           >
-            {snapshot.state === "speaking"
-              ? "Active — AI Speaking"
-              : snapshot.state === "processing"
-              ? "Thinking..."
-              : "Silent"}
+            {speakingLabel}
           </span>
         </div>
       </div>
 
       {/* Central Orb & Waveform */}
-      <VoiceOrbWaveform state={snapshot.state} isMuted={snapshot.isMuted} />
+      <VoiceOrbWaveform
+        state={snapshot.state}
+        isMuted={snapshot.isMuted}
+        isUserSpeaking={Boolean(snapshot.isUserSpeaking)}
+        hasResponseError={Boolean(snapshot.responseError)}
+      />
+
+      {/* Playback Autoplay Recovery Banner */}
+      {snapshot.playbackState?.autoplayBlocked && (
+        <div
+          role="alert"
+          data-testid="voice-playback-warning-banner"
+          className="flex flex-col justify-between gap-3 rounded-xl border border-amber-400/40 bg-amber-950/35 p-4 text-sm text-amber-100 sm:flex-row sm:items-center"
+        >
+          <div>
+            <p className="font-semibold text-amber-200">
+              Audio Playback Blocked by Browser Autoplay Policy
+            </p>
+            <p className="mt-0.5 text-xs text-amber-100/90">
+              {snapshot.playbackState.warningMessage}
+            </p>
+          </div>
+          <button
+            type="button"
+            data-testid="resume-playback-button"
+            onClick={() => void handleResumePlayback()}
+            className="shrink-0 rounded-lg border border-amber-300/50 bg-amber-400/20 px-3.5 py-2 text-xs font-semibold text-amber-100 transition hover:bg-amber-400/30"
+          >
+            Enable AI Audio
+          </button>
+        </div>
+      )}
+
+      {/* Non-Fatal AI Response Error Banner */}
+      {snapshot.responseError && !snapshot.error && (
+        <div
+          role="alert"
+          data-testid="voice-response-error-banner"
+          className="rounded-xl border border-rose-500/40 bg-rose-950/30 p-4 text-sm text-rose-200"
+        >
+          <p className="font-semibold text-rose-100">
+            Response Error ({snapshot.responseError.code})
+          </p>
+          <p className="mt-0.5 text-xs text-rose-200/90">
+            {snapshot.responseError.message}
+          </p>
+        </div>
+      )}
 
       {/* Stage 4 Validated Tool Execution & Human Escalation Status Banners */}
       {snapshot.lastToolExecution && (
         <div
           data-testid="last-tool-execution-badge"
-          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#36C6D3]/30 bg-[#0B1020]/90 px-4 py-2.5 text-xs"
+          className={`flex flex-col gap-1 rounded-xl border px-4 py-2.5 text-xs ${
+            snapshot.lastToolExecution.status === "succeeded"
+              ? "border-[#36C6D3]/30 bg-[#0B1020]/90"
+              : "border-rose-500/40 bg-rose-950/30"
+          }`}
         >
-          <span className="font-semibold text-[#36C6D3]">
-            Stage 4 Agent Tool Executed:{" "}
-            <code className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[#F5F7FC]">
-              {snapshot.lastToolExecution.toolName}
-            </code>
-          </span>
-          <span className="text-[#A7B0C4]">
-            Status:{" "}
-            <strong className="uppercase text-[#F5F7FC]">
-              {snapshot.lastToolExecution.status}
-            </strong>
-          </span>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span
+              className={`font-semibold ${
+                snapshot.lastToolExecution.status === "succeeded"
+                  ? "text-[#36C6D3]"
+                  : "text-rose-200"
+              }`}
+            >
+              Agent Tool Executed:{" "}
+              <code className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[#F5F7FC]">
+                {snapshot.lastToolExecution.toolName}
+              </code>
+            </span>
+            <span className="text-[#A7B0C4]">
+              Status:{" "}
+              <strong
+                className={`uppercase ${
+                  snapshot.lastToolExecution.status === "succeeded"
+                    ? "text-[#F5F7FC]"
+                    : "text-rose-300"
+                }`}
+              >
+                {snapshot.lastToolExecution.status}
+              </strong>
+            </span>
+          </div>
+          {snapshot.lastToolExecution.summary && (
+            <p className="text-[11px] text-[#A7B0C4]">
+              {snapshot.lastToolExecution.summary}
+            </p>
+          )}
         </div>
       )}
 
@@ -486,6 +612,110 @@ export function VoiceSessionPanel({
               </span>
             </p>
           </div>
+          {snapshot.microphoneDiagnostics && (
+            <div className="border-t border-white/10 pt-3 md:col-span-2">
+              <p className="font-semibold uppercase tracking-wider text-[#36C6D3]">
+                Audio Pipeline Diagnostics
+              </p>
+              <div className="mt-1.5 flex flex-wrap items-center gap-4 text-[#A7B0C4]">
+                <span>
+                  Mic Track:{" "}
+                  <strong className="text-[#F5F7FC]">
+                    {snapshot.microphoneDiagnostics.trackAttached
+                      ? snapshot.microphoneDiagnostics.trackReadyState === "live"
+                        ? snapshot.microphoneDiagnostics.trackEnabled
+                          ? "Live & Enabled"
+                          : "Live (Muted)"
+                        : "Ended"
+                      : "Not Attached"}
+                  </strong>
+                </span>
+                <span>
+                  Mic Signal:{" "}
+                  <strong
+                    data-testid="mic-signal-status"
+                    className={
+                      snapshot.microphoneDiagnostics.hasDetectedAudioActivity
+                        ? "text-[#36C6D3]"
+                        : "text-[#F5F7FC]"
+                    }
+                  >
+                    {snapshot.isMuted
+                      ? "Paused (Muted)"
+                      : snapshot.microphoneDiagnostics.hasDetectedAudioActivity
+                      ? "Audio Activity Detected"
+                      : "Waiting for Voice Input"}
+                  </strong>
+                </span>
+                <span>
+                  Remote Playback:{" "}
+                  <strong
+                    data-testid="remote-playback-status"
+                    className={
+                      snapshot.playbackState?.autoplayBlocked
+                        ? "text-amber-300"
+                        : snapshot.playbackState?.isPlaying
+                        ? "text-[#36C6D3]"
+                        : "text-[#F5F7FC]"
+                    }
+                  >
+                    {snapshot.playbackState?.autoplayBlocked
+                      ? "Autoplay Blocked"
+                      : snapshot.playbackState?.isPlaying
+                      ? "Active"
+                      : snapshot.playbackState?.remoteTrackReceived
+                      ? "Track Attached"
+                      : "Waiting for Remote Track"}
+                  </strong>
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Bounded Realtime Event Telemetry */}
+      {snapshot.events.length > 0 && (
+        <div
+          data-testid="voice-event-telemetry"
+          className="rounded-xl border border-white/10 bg-[#0B1020]/70 p-4 text-xs"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <p className="font-semibold uppercase tracking-wider text-[#A7B0C4]">
+              Realtime Event Telemetry ({snapshot.events.length})
+            </p>
+            <span className="font-mono text-[10px] text-[#A7B0C4]">
+              Metadata only • No audio or credentials logged
+            </span>
+          </div>
+          <ul className="mt-2 max-h-44 space-y-1.5 overflow-y-auto pr-1 font-mono text-[11px]">
+            {snapshot.events.slice(0, 15).map((entry) => (
+              <li
+                key={entry.id}
+                className="flex flex-wrap items-baseline gap-2 rounded bg-white/[0.03] px-2 py-1"
+              >
+                <span
+                  className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase ${
+                    entry.eventType.includes("error") ||
+                    entry.eventType.includes("failed") ||
+                    entry.eventType.includes("blocked")
+                      ? "bg-rose-500/20 text-rose-300"
+                      : entry.direction === "inbound"
+                      ? "bg-[#36C6D3]/15 text-[#36C6D3]"
+                      : entry.direction === "outbound"
+                      ? "bg-[#7657F6]/20 text-[#B8A8FF]"
+                      : "bg-white/10 text-[#A7B0C4]"
+                  }`}
+                >
+                  {entry.direction}
+                </span>
+                <span className="font-semibold text-[#F5F7FC]">
+                  {entry.eventType}
+                </span>
+                <span className="text-[#A7B0C4]">{entry.summary}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </div>

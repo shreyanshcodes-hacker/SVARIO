@@ -56,7 +56,12 @@ export type RealtimeServerEventType =
   | "input_audio_buffer.speech_stopped"
   | "input_audio_buffer.committed"
   | "input_audio_buffer.cleared"
+  | "input_audio_buffer.timeout_triggered"
+  | "conversation.item.input_audio_transcription.completed"
+  | "conversation.item.input_audio_transcription.failed"
   | "response.created"
+  | "response.output_item.added"
+  | "response.content_part.added"
   | "response.done"
   | "response.cancelled"
   | "response.audio.delta"
@@ -92,17 +97,53 @@ export interface RealtimeInputSpeechEvent extends RealtimeServerEventBase {
     | "input_audio_buffer.speech_started"
     | "input_audio_buffer.speech_stopped"
     | "input_audio_buffer.committed"
-    | "input_audio_buffer.cleared";
+    | "input_audio_buffer.cleared"
+    | "input_audio_buffer.timeout_triggered";
   item_id?: string;
   audio_start_ms?: number;
   audio_end_ms?: number;
 }
 
+export interface RealtimeInputTranscriptionEvent extends RealtimeServerEventBase {
+  type:
+    | "conversation.item.input_audio_transcription.completed"
+    | "conversation.item.input_audio_transcription.failed";
+  item_id?: string;
+  error?: {
+    type?: string;
+    code?: string;
+    message?: string;
+  };
+}
+
 export interface RealtimeResponseLifecycleEvent extends RealtimeServerEventBase {
-  type: "response.created" | "response.done" | "response.cancelled";
+  type:
+    | "response.created"
+    | "response.output_item.added"
+    | "response.content_part.added"
+    | "response.done"
+    | "response.cancelled";
   response?: {
     id?: string;
     status?: string;
+    status_details?: {
+      type?: string;
+      reason?: string;
+      error?: {
+        type?: string;
+        code?: string;
+        message?: string;
+      };
+    };
+  };
+  item?: {
+    id?: string;
+    type?: string;
+    role?: string;
+    name?: string;
+  };
+  part?: {
+    type?: string;
   };
 }
 
@@ -141,6 +182,7 @@ export interface RealtimeFunctionCallArgumentsDoneEvent
 export type RealtimeServerEvent =
   | RealtimeSessionLifecycleEvent
   | RealtimeInputSpeechEvent
+  | RealtimeInputTranscriptionEvent
   | RealtimeResponseLifecycleEvent
   | RealtimeAudioOutputEvent
   | RealtimeFunctionCallArgumentsDoneEvent
@@ -153,6 +195,28 @@ export interface RealtimeEventTelemetryEntry {
   direction: "inbound" | "outbound" | "lifecycle";
   eventType: string;
   summary: string;
+}
+
+export interface MicrophoneDiagnosticsState {
+  trackAttached: boolean;
+  trackEnabled: boolean;
+  trackReadyState: "live" | "ended" | "unknown";
+  trackMutedBySystem: boolean;
+  inputLevel: number;
+  hasDetectedAudioActivity: boolean;
+}
+
+export interface RemotePlaybackState {
+  remoteTrackReceived: boolean;
+  autoplayBlocked: boolean;
+  isPlaying: boolean;
+  warningMessage: string | null;
+}
+
+export interface ResponseErrorState {
+  code: string;
+  message: string;
+  timestamp: string;
 }
 
 export interface LastToolExecutionState {
@@ -174,12 +238,16 @@ export interface VoiceClientSnapshot {
   state: VoiceSessionState;
   permissionState: MicrophonePermissionState;
   isMuted: boolean;
+  isUserSpeaking?: boolean;
   activeSession: VoiceSessionCreateResponseData | null;
   error: VoiceClientError | null;
+  responseError?: ResponseErrorState | null;
   activeResponseId: string | null;
   expiresAtIso: string | null;
   events: RealtimeEventTelemetryEntry[];
   preferredLanguage?: LanguageCodeType;
   lastToolExecution?: LastToolExecutionState | null;
   escalationNotice?: HumanEscalationNoticeState | null;
+  microphoneDiagnostics?: MicrophoneDiagnosticsState;
+  playbackState?: RemotePlaybackState;
 }

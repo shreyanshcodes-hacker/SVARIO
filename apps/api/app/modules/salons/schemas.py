@@ -16,6 +16,8 @@ import re
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 TIME_HHMM_REGEX = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+TIME_12H_REGEX = re.compile(r"^(\d{1,2})(?::([0-5]\d))?\s*(am|pm)$", re.IGNORECASE)
+TIME_24H_FLEX_REGEX = re.compile(r"^(\d{1,2}):([0-5]\d)(?::[0-5]\d)?$")
 PHONE_BASIC_REGEX = re.compile(r"^\+?[0-9][0-9\-\s()]{4,28}[0-9]$")
 EMAIL_BASIC_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -34,17 +36,34 @@ def format_minutes_to_hhmm(total_minutes: int) -> str:
 
 
 def normalize_time_string(raw: Optional[str]) -> Optional[str]:
-    """Normalize HH:MM:SS or HH:MM to HH:MM and validate."""
+    """Normalize 24-hour (HH:MM, H:MM, HH:MM:SS) or 12-hour AM/PM time strings to canonical HH:MM."""
     if raw is None:
         return None
     cleaned = raw.strip()
     if not cleaned:
         return None
-    if len(cleaned) >= 5 and cleaned[2] == ":":
-        cleaned = cleaned[:5]
-    if not TIME_HHMM_REGEX.match(cleaned):
-        raise ValueError(f"Time '{raw}' must be in 24-hour HH:MM format (00:00 to 23:59).")
-    return cleaned
+
+    m12 = TIME_12H_REGEX.match(cleaned)
+    if m12:
+        hour_12 = int(m12.group(1))
+        minute = int(m12.group(2) or "0")
+        meridiem = m12.group(3).lower()
+        if hour_12 < 1 or hour_12 > 12:
+            raise ValueError(f"Time '{raw}' must be a valid 12-hour or 24-hour time.")
+        if meridiem == "am":
+            hour_24 = 0 if hour_12 == 12 else hour_12
+        else:
+            hour_24 = 12 if hour_12 == 12 else hour_12 + 12
+        return f"{hour_24:02d}:{minute:02d}"
+
+    m24 = TIME_24H_FLEX_REGEX.match(cleaned)
+    if m24:
+        hour_24 = int(m24.group(1))
+        minute = int(m24.group(2))
+        if 0 <= hour_24 <= 23:
+            return f"{hour_24:02d}:{minute:02d}"
+
+    raise ValueError(f"Time '{raw}' must be in 24-hour HH:MM format (00:00 to 23:59).")
 
 
 class SalonAppointmentStatus(str, Enum):

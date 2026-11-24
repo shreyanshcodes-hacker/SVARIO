@@ -305,7 +305,9 @@ def test_short_lived_credential_contract_and_secrets_never_exposed() -> None:
         assert body["data_channel_label"] == "oai-events"
         assert body["capabilities"]["raw_audio_storage_enabled"] is False
         assert body["capabilities"]["transcript_storage_enabled"] is False
-        assert body["capabilities"]["appointment_booking_enabled"] is False
+        expected_salon_caps = industry == "salon"
+        assert body["capabilities"]["appointment_booking_enabled"] is expected_salon_caps
+        assert body["capabilities"]["industry_workflows_enabled"] is expected_salon_caps
         assert body["assistant_context"]["business_name"] == biz_name
         assert body["assistant_context"]["supported_languages"] == [
             "en",
@@ -316,7 +318,11 @@ def test_short_lived_credential_contract_and_secrets_never_exposed() -> None:
         # Verify healthcare administrative-only guardrails are enforced for clinic & hospital
         last_upstream = upstream_calls[-1]
         session_cfg = last_upstream["session"]
+        assert session_cfg["output_modalities"] == ["audio"]
         assert session_cfg["audio"]["input"]["transcription"] is None
+        assert session_cfg["audio"]["input"]["turn_detection"]["type"] == "server_vad"
+        assert session_cfg["audio"]["input"]["turn_detection"]["create_response"] is True
+        assert session_cfg["audio"]["output"]["voice"] == "shimmer"
         if industry in {"clinic", "hospital"}:
             assert body["assistant_context"]["administrative_only_guardrails"] is True
             assert "ADMINISTRATIVE-ONLY" in session_cfg["instructions"]
@@ -412,3 +418,312 @@ def test_voice_session_rate_limiting_enforced() -> None:
     assert r2.status_code == 201
     assert r3.status_code == 429
     assert "Retry-After" in r3.headers
+
+
+def test_salon_realtime_tools_and_end_to_end_booking_flow() -> None:
+    """10. End-to-end salon Realtime tool definitions, member JWT forwarding, availability, booking, idempotency, and conflict rejection."""
+    from datetime import date, timedelta
+    from app.agents.orchestrator import AgentOrchestrator
+    from app.modules.salons.repository import InMemorySalonRepository
+    from app.modules.salons.schemas import (
+        SalonServiceCreateRequest,
+        SalonStaffCreateRequest,
+    )
+    from app.modules.salons.service import SalonWorkflowService
+
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_key = private_key.public_key()
+    recorded_upstream_payloads: List[Dict[str, Any]] = []
+
+    settings = Settings(
+        SUPABASE_URL="https://test-project.supabase.co",
+        SUPABASE_JWT_ISSUER=TEST_ISSUER,
+        SUPABASE_JWT_AUDIENCE=TEST_AUDIENCE,
+        SUPABASE_JWT_ALGORITHMS="ES256",
+        OPENAI_API_KEY=TEST_PERMANENT_OPENAI_KEY,
+        OPENAI_REALTIME_MODEL="gpt-realtime",
+        OPENAI_REALTIME_VOICE="alloy",
+        OPENAI_REALTIME_SESSION_TTL_SECONDS=120,
+        VOICE_SESSION_RATE_LIMIT_PER_MINUTE=30,
+        VOICE_PUBLIC_TOKEN_SECRET="stage3-unit-test-hmac-secret-key-2026",
+    )
+
+    verifier = SupabaseJWTVerifier(
+        settings=settings,
+        key_resolver=lambda _tok, _hdr: public_key,
+    )
+    org_repo = InMemoryOrganizationRepository()
+    org_service = OrganizationService(repository=org_repo)
+    onboarding_repo = InMemoryOnboardingRepository(org_repo=org_repo)
+    onboarding_service = OnboardingService(repository=onboarding_repo)
+    salon_repo = InMemorySalonRepository()
+    salon_service = SalonWorkflowService(
+        settings=settings,
+        salon_repo=salon_repo,
+        onboarding_repo=onboarding_repo,
+    )
+    orchestrator = AgentOrchestrator(
+        rate_limiter=VoiceSessionRateLimiter(window_seconds=60),
+        max_tool_calls_per_turn=10,
+        salon_service=salon_service,
+    )
+
+    async def _mock_upstream_mint(
+        cfg: Settings, session_payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        recorded_upstream_payloads.append(session_payload)
+        expires_ts = int(
+            (datetime.now(timezone.utc) + timedelta(seconds=120)).timestamp()
+        )
+        return {
+            "id": "sess_salon_e2e_001",
+            "model": cfg.openai_realtime_model,
+            "client_secret": {
+                "value": "ek_ephemeral_salon_e2e_token",
+                "expires_at": expires_ts,
+            },
+        }
+
+    voice_service = VoiceSessionService(
+        settings=settings,
+        onboarding_service=onboarding_service,
+        rate_limiter=VoiceSessionRateLimiter(window_seconds=60),
+        public_registry=PublicVoicePolicyRegistry(),
+        upstream_mint=_mock_upstream_mint,
+        orchestrator=orchestrator,
+    )
+
+    app = create_app()
+    app.dependency_overrides[get_jwt_verifier] = lambda: verifier
+    app.dependency_overrides[get_organization_service] = lambda: org_service
+    app.dependency_overrides[get_onboarding_service] = lambda: onboarding_service
+    app.dependency_overrides[get_voice_session_service] = lambda: voice_service
+
+    client = TestClient(app)
+    owner_id = uuid4()
+    owner_token = make_token(private_key, owner_id, email="salon-owner@svario.ai")
+    org_id = create_org_Helper(client, owner_token, "Velvet Crown Salon", "salon")
+    bundle_resp = client.get(
+        f"/api/v1/organizations/{org_id}/onboarding",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert bundle_resp.status_code == 200
+    biz_id = UUID(bundle_resp.json()["business_id"])
+
+    # Seed real salon service + qualified stylist via salon_service
+    import asyncio
+    actor_obj = verifier.verify_token(owner_token)
+    svc = asyncio.run(
+        salon_service.create_service(
+            actor=actor_obj,
+            organization_id=UUID(org_id),
+            business_id=biz_id,
+            payload=SalonServiceCreateRequest(
+                name="Classic Haircut",
+                category="Hair",
+                duration_minutes=45,
+                price=600.0,
+                currency="INR",
+                is_active=True,
+            ),
+        )
+    )
+    stylist = asyncio.run(
+        salon_service.create_staff(
+            actor=actor_obj,
+            organization_id=UUID(org_id),
+            business_id=biz_id,
+            payload=SalonStaffCreateRequest(
+                full_name="Aanya Verma",
+                role_designation="Senior Stylist",
+                is_active=True,
+            ),
+        )
+    )
+    asyncio.run(
+        salon_service.assign_staff_services(
+            actor=actor_obj,
+            organization_id=UUID(org_id),
+            business_id=biz_id,
+            staff_id=stylist.id,
+            service_ids=[svc.id],
+        )
+    )
+
+    # 1 & 2 & 3: Create salon Realtime session -> capabilities & tools verified
+    sess_resp = client.post(
+        "/api/v1/voice/sessions",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={"organization_id": org_id},
+    )
+    assert sess_resp.status_code == 201
+    sess_body = sess_resp.json()
+    assert sess_body["capabilities"]["appointment_booking_enabled"] is True
+    assert sess_body["capabilities"]["industry_workflows_enabled"] is True
+
+    upstream_session = recorded_upstream_payloads[-1]["session"]
+    assert upstream_session["tool_choice"] == "auto"
+    tool_names = {t["name"] for t in upstream_session["tools"]}
+    for required_tool in {
+        "get_salon_services",
+        "get_salon_staff",
+        "check_salon_availability",
+        "create_salon_appointment",
+        "reschedule_salon_appointment",
+        "cancel_salon_appointment",
+        "get_business_profile",
+        "get_business_hours",
+        "search_business_knowledge",
+    }:
+        assert required_tool in tool_names
+    # Clinic tools must NOT be exposed to salon sessions
+    assert not any("clinic" in name for name in tool_names)
+
+    # 4: get_salon_services returns actual seeded service records
+    svc_tool_resp = client.post(
+        "/api/v1/voice/tools/execute",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "session_id": sess_body["session_id"],
+            "organization_id": org_id,
+            "business_id": str(biz_id),
+            "access_mode": "organization_member",
+            "call_id": "call_salon_svc_1",
+            "tool_name": "get_salon_services",
+            "arguments": {},
+        },
+    )
+    assert svc_tool_resp.status_code == 200
+    svc_tool_body = svc_tool_resp.json()
+    assert svc_tool_body["call_id"] == "call_salon_svc_1"
+    assert svc_tool_body["status"] == "succeeded"
+    assert svc_tool_body["output"]["count"] == 1
+    assert svc_tool_body["output"]["services"][0]["name"] == "Classic Haircut"
+    assert svc_tool_body["output"]["services"][0]["price"] == 600.0
+
+    # Pick a weekday (Monday-Saturday) in the near future
+    target_date = date.today() + timedelta(days=1)
+    while target_date.weekday() == 6:  # Avoid Sunday if closed
+        target_date += timedelta(days=1)
+    target_date_str = target_date.isoformat()
+
+    # 5: check_salon_availability returns valid available slots
+    avail_resp = client.post(
+        "/api/v1/voice/tools/execute",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "session_id": sess_body["session_id"],
+            "organization_id": org_id,
+            "business_id": str(biz_id),
+            "access_mode": "organization_member",
+            "call_id": "call_salon_avail_1",
+            "tool_name": "check_salon_availability",
+            "arguments": {
+                "service_id": str(svc.id),
+                "requested_date": target_date_str,
+            },
+        },
+    )
+    assert avail_resp.status_code == 200
+    avail_body = avail_resp.json()
+    assert avail_body["status"] == "succeeded"
+    assert avail_body["output"]["total_slots_available"] > 0
+    chosen_slot = avail_body["output"]["available_slots"][0]
+
+    # 8: Booking intent via agent turn NEVER executes booking without confirmation
+    turn_resp = client.post(
+        "/api/v1/agent/turns",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "session_id": sess_body["session_id"],
+            "organization_id": org_id,
+            "business_id": str(biz_id),
+            "access_mode": "organization_member",
+            "user_input": "I want to book a Classic Haircut tomorrow at 4 PM",
+        },
+    )
+    assert turn_resp.status_code == 200
+    assert turn_resp.json()["booking_created"] is False
+
+    # 6: Confirmed create_salon_appointment commits appointment to repository
+    book_resp = client.post(
+        "/api/v1/voice/tools/execute",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "session_id": sess_body["session_id"],
+            "organization_id": org_id,
+            "business_id": str(biz_id),
+            "access_mode": "organization_member",
+            "call_id": "call_salon_book_1",
+            "tool_name": "create_salon_appointment",
+            "arguments": {
+                "service_id": str(svc.id),
+                "staff_id": chosen_slot["staff_id"],
+                "appointment_date": target_date_str,
+                "start_time": chosen_slot["start_time"],
+                "customer_name": "Riya Sharma",
+                "customer_phone": "+919876543210",
+                "idempotency_key": "idem-voice-booking-001",
+            },
+        },
+    )
+    assert book_resp.status_code == 200
+    book_body = book_resp.json()
+    assert book_body["call_id"] == "call_salon_book_1"
+    assert book_body["status"] == "succeeded"
+    assert book_body["output"]["booking_confirmed"] is True
+    booking_ref = book_body["output"]["booking_reference"]
+    assert booking_ref.startswith("SV-SAL-")
+
+    # 9a: Duplicate idempotent booking returns same booking reference safely
+    dup_idem_resp = client.post(
+        "/api/v1/voice/tools/execute",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "session_id": sess_body["session_id"],
+            "organization_id": org_id,
+            "business_id": str(biz_id),
+            "access_mode": "organization_member",
+            "call_id": "call_salon_book_dup",
+            "tool_name": "create_salon_appointment",
+            "arguments": {
+                "service_id": str(svc.id),
+                "staff_id": chosen_slot["staff_id"],
+                "appointment_date": target_date_str,
+                "start_time": chosen_slot["start_time"],
+                "customer_name": "Riya Sharma",
+                "customer_phone": "+919876543210",
+                "idempotency_key": "idem-voice-booking-001",
+            },
+        },
+    )
+    assert dup_idem_resp.status_code == 200
+    assert dup_idem_resp.json()["status"] == "succeeded"
+    assert dup_idem_resp.json()["output"]["booking_reference"] == booking_ref
+
+    # 7 & 9b: Conflicting booking on same staff/time without same idempotency key is rejected cleanly
+    conflict_resp = client.post(
+        "/api/v1/voice/tools/execute",
+        headers={"Authorization": f"Bearer {owner_token}"},
+        json={
+            "session_id": sess_body["session_id"],
+            "organization_id": org_id,
+            "business_id": str(biz_id),
+            "access_mode": "organization_member",
+            "call_id": "call_salon_book_conflict",
+            "tool_name": "create_salon_appointment",
+            "arguments": {
+                "service_id": str(svc.id),
+                "staff_id": chosen_slot["staff_id"],
+                "appointment_date": target_date_str,
+                "start_time": chosen_slot["start_time"],
+                "customer_name": "Another Caller",
+                "customer_phone": "+919811112222",
+            },
+        },
+    )
+    assert conflict_resp.status_code == 200
+    conflict_body = conflict_resp.json()
+    assert conflict_body["call_id"] == "call_salon_book_conflict"
+    assert conflict_body["status"] == "rejected"
+    assert conflict_body["output"]["error"] == "http_409"
