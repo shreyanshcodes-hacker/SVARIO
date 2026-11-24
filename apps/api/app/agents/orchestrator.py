@@ -542,19 +542,22 @@ class AgentOrchestrator:
                     "http_status": exc.status_code,
                 },
             )
+            err_output: Dict[str, Any] = {
+                "error": f"http_{exc.status_code}",
+                "message": (
+                    detail_msg
+                    if is_client_rejection
+                    else f"{detail_msg} Do not claim the action succeeded."
+                ),
+            }
+            if not is_client_rejection and tool_name == AgentToolName.CHECK_SALON_AVAILABILITY:
+                err_output["availability_status"] = "AVAILABILITY_DATA_ERROR"
             return VoiceToolExecutionResponse(
                 session_id=session_id,
                 call_id=call_id,
                 tool_name=tool_name,
                 status=tool_status,
-                output={
-                    "error": f"http_{exc.status_code}",
-                    "message": (
-                        detail_msg
-                        if is_client_rejection
-                        else f"{detail_msg} Do not claim the action succeeded."
-                    ),
-                },
+                output=err_output,
                 detected_language=ctx.detected_language,
             )
         except Exception as exc:
@@ -577,15 +580,18 @@ class AgentOrchestrator:
                 target_id=call_id,
                 metadata={"tool_name": tool_name.value, "status": "error"},
             )
+            exc_output: Dict[str, Any] = {
+                "error": "tool_execution_failed",
+                "message": "Tool execution encountered an internal error. Do not claim the action succeeded.",
+            }
+            if tool_name == AgentToolName.CHECK_SALON_AVAILABILITY:
+                exc_output["availability_status"] = "AVAILABILITY_DATA_ERROR"
             return VoiceToolExecutionResponse(
                 session_id=session_id,
                 call_id=call_id,
                 tool_name=tool_name,
                 status="error",
-                output={
-                    "error": "tool_execution_failed",
-                    "message": "Tool execution encountered an internal error. Do not claim the action succeeded.",
-                },
+                output=exc_output,
                 detected_language=ctx.detected_language,
             )
 

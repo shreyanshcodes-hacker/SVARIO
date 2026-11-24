@@ -339,8 +339,12 @@ class CheckSalonAvailabilityToolInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     service_id: str = Field(..., description="ID of the salon service (from get_salon_services)")
-    requested_date: str = Field(..., description="Date in YYYY-MM-DD format (e.g. 2026-11-16)")
+    requested_date: str = Field(..., description="Date in YYYY-MM-DD format (e.g. 2026-11-25)")
     staff_id: Optional[str] = Field(default=None, description="Optional preferred staff ID")
+    requested_time: Optional[str] = Field(
+        default=None,
+        description="Optional requested time (e.g. '14:00' or '2:00 PM') to verify directly against available slots.",
+    )
 
 
 class SalonSlotSummaryItem(BaseModel):
@@ -360,6 +364,10 @@ class CheckSalonAvailabilityToolOutput(BaseModel):
     timezone: str
     is_business_closed: bool
     closure_reason: Optional[str] = None
+    availability_status: str = "AVAILABLE"
+    status_reason: Optional[str] = None
+    requested_time: Optional[str] = None
+    requested_time_available: Optional[bool] = None
     available_slots: List[SalonSlotSummaryItem]
     total_slots_available: int
 

@@ -12,6 +12,7 @@ Orchestrates:
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
@@ -42,6 +43,7 @@ from app.modules.salons.schemas import (
     SalonAppointmentStatus,
     SalonAvailabilityResponse,
     SalonAvailabilitySlot,
+    SalonAvailabilityStatus,
     SalonHolidayCreateRequest,
     SalonHolidayResponse,
     SalonServiceCreateRequest,
@@ -55,8 +57,11 @@ from app.modules.salons.schemas import (
     SalonStaffWorkingHoursItem,
     SalonStaffWorkingHoursUpdateRequest,
     format_minutes_to_hhmm,
+    normalize_time_string,
     parse_hhmm_to_minutes,
 )
+
+logger = logging.getLogger("svario.salons.availability")
 
 
 _TIMEZONE_ALIASES: Dict[str, str] = {
@@ -300,10 +305,13 @@ class SalonWorkflowService:
         service_id: UUID,
         requested_date: date,
         staff_id: Optional[UUID] = None,
+        requested_time: Optional[str] = None,
         business_hours_override: Optional[BusinessHoursResponse] = None,
     ) -> SalonAvailabilityResponse:
         """Compute all non-conflicting bookable slots for a service and date."""
         await self._verify_org_access(actor, organization_id, business_id, require_admin=False)
+        normalized_req_time = normalize_time_string(requested_time) if requested_time else None
+
         service = await self._salon_repo.get_service(actor, organization_id, business_id, service_id)
         if not service.is_active:
             raise HTTPException(
@@ -333,6 +341,11 @@ class SalonWorkflowService:
         )
         matching_hours = next((h for h in biz_hours_resp.schedule if h.weekday == svario_weekday), None)
         if matching_hours is None or matching_hours.is_closed or not matching_hours.opens_at or not matching_hours.closes_at:
+            reason = "Salon is closed on this day of the week according to regular operating hours."
+            logger.info(
+                "salon_availability business_id=%s service_id=%s date=%s weekday=%s tz=%s status=BUSINESS_CLOSED",
+                business_id, service.id, requested_date, svario_weekday, tz_str,
+            )
             return SalonAvailabilityResponse(
                 organization_id=organization_id,
                 business_id=business_id,
@@ -344,7 +357,11 @@ class SalonWorkflowService:
                 requested_date=requested_date,
                 timezone=tz_str,
                 is_business_closed=True,
-                closure_reason="Salon is closed on this day of the week according to regular operating hours.",
+                closure_reason=reason,
+                availability_status=SalonAvailabilityStatus.BUSINESS_CLOSED,
+                status_reason=reason,
+                requested_time=normalized_req_time,
+                requested_time_available=False if normalized_req_time else None,
                 available_slots=[],
             )
 
@@ -355,6 +372,11 @@ class SalonWorkflowService:
         holidays = await self._salon_repo.list_holidays(actor, organization_id, business_id, start_date=requested_date, end_date=requested_date)
         salon_closure = next((h for h in holidays if h.staff_id is None and h.is_closed_all_day), None)
         if salon_closure:
+            reason = f"Salon is closed for holiday: {salon_closure.title}"
+            logger.info(
+                "salon_availability business_id=%s service_id=%s date=%s weekday=%s tz=%s status=BUSINESS_CLOSED reason=holiday",
+                business_id, service.id, requested_date, svario_weekday, tz_str,
+            )
             return SalonAvailabilityResponse(
                 organization_id=organization_id,
                 business_id=business_id,
@@ -366,7 +388,11 @@ class SalonWorkflowService:
                 requested_date=requested_date,
                 timezone=tz_str,
                 is_business_closed=True,
-                closure_reason=f"Salon is closed for holiday: {salon_closure.title}",
+                closure_reason=reason,
+                availability_status=SalonAvailabilityStatus.BUSINESS_CLOSED,
+                status_reason=reason,
+                requested_time=normalized_req_time,
+                requested_time_available=False if normalized_req_time else None,
                 available_slots=[],
             )
 
@@ -395,6 +421,34 @@ class SalonWorkflowService:
             all_staff = await self._salon_repo.list_staff(actor, organization_id, business_id, service_id=service.id, is_active=True)
             qualified_staff.extend(all_staff)
 
+        if not qualified_staff:
+            reason = (
+                f"No active stylist is currently assigned to '{service.name}'. "
+                "Please add an active stylist and assign this service in the Salon Dashboard before booking."
+            )
+            logger.warning(
+                "salon_availability business_id=%s service_id=%s date=%s weekday=%s tz=%s status=NO_QUALIFIED_STAFF",
+                business_id, service.id, requested_date, svario_weekday, tz_str,
+            )
+            return SalonAvailabilityResponse(
+                organization_id=organization_id,
+                business_id=business_id,
+                service_id=service.id,
+                service_name=service.name,
+                duration_minutes=service.duration_minutes,
+                price=service.price,
+                currency=service.currency,
+                requested_date=requested_date,
+                timezone=tz_str,
+                is_business_closed=False,
+                closure_reason=None,
+                availability_status=SalonAvailabilityStatus.NO_QUALIFIED_STAFF,
+                status_reason=reason,
+                requested_time=normalized_req_time,
+                requested_time_available=False if normalized_req_time else None,
+                available_slots=[],
+            )
+
         # 4. Fetch existing active appointments for this date
         existing_appointments = await self._salon_repo.list_appointments(
             actor, organization_id, business_id, appointment_date=requested_date
@@ -408,16 +462,23 @@ class SalonWorkflowService:
         available_slots: List[SalonAvailabilitySlot] = []
         slot_step_minutes = 15
         duration = service.duration_minutes
+        staff_with_valid_schedule = 0
+        staff_with_missing_schedule = 0
 
         for staff in qualified_staff:
             # Check staff leave/holiday
             staff_leave = next((h for h in holidays if h.staff_id == staff.id and h.is_closed_all_day), None)
             if staff_leave:
+                staff_with_valid_schedule += 1
                 continue
 
             # Check staff working hours for this weekday
             wh_item = next((wh for wh in staff.working_hours if wh.weekday == svario_weekday), None)
-            if not wh_item or wh_item.is_off or not wh_item.start_time or not wh_item.end_time:
+            if wh_item is None or (not wh_item.is_off and (not wh_item.start_time or not wh_item.end_time)):
+                staff_with_missing_schedule += 1
+                continue
+            staff_with_valid_schedule += 1
+            if wh_item.is_off or not wh_item.start_time or not wh_item.end_time:
                 continue
 
             staff_start_min = max(biz_open_min, parse_hhmm_to_minutes(wh_item.start_time))
@@ -489,6 +550,45 @@ class SalonWorkflowService:
 
         available_slots.sort(key=lambda s: (s.start_time, s.staff_name))
 
+        req_time_available: Optional[bool] = None
+        if normalized_req_time is not None:
+            req_time_available = any(s.start_time == normalized_req_time for s in available_slots)
+
+        if available_slots:
+            if normalized_req_time is not None and not req_time_available:
+                avail_status = SalonAvailabilityStatus.REQUESTED_TIME_UNAVAILABLE
+                status_reason = (
+                    f"The requested time {normalized_req_time} is not available for '{service.name}' on {requested_date}, "
+                    f"but {len(available_slots)} alternative slot(s) are open on that date."
+                )
+            else:
+                avail_status = SalonAvailabilityStatus.AVAILABLE
+                status_reason = (
+                    f"Requested time {normalized_req_time} is available for '{service.name}' on {requested_date}."
+                    if normalized_req_time
+                    else f"{len(available_slots)} slot(s) available for '{service.name}' on {requested_date}."
+                )
+        elif staff_with_valid_schedule == 0 and staff_with_missing_schedule > 0:
+            avail_status = SalonAvailabilityStatus.STAFF_SCHEDULE_MISSING
+            status_reason = (
+                f"Working hours for weekday {svario_weekday} are missing or incomplete for qualified staff "
+                f"assigned to '{service.name}'."
+            )
+        else:
+            avail_status = SalonAvailabilityStatus.REQUESTED_TIME_UNAVAILABLE
+            status_reason = (
+                f"No open slots remain for '{service.name}' on {requested_date} "
+                "(existing appointments, breaks, or staff day-off cover available hours)."
+            )
+
+        logger.info(
+            "salon_availability business_id=%s service_id=%s duration=%s date=%s weekday=%s tz=%s "
+            "qualified_staff=%s blocking_appts=%s slots=%s req_time=%s req_avail=%s status=%s",
+            business_id, service.id, duration, requested_date, svario_weekday, tz_str,
+            len(qualified_staff), len(active_appts), len(available_slots),
+            normalized_req_time, req_time_available, avail_status.value,
+        )
+
         return SalonAvailabilityResponse(
             organization_id=organization_id,
             business_id=business_id,
@@ -501,6 +601,10 @@ class SalonWorkflowService:
             timezone=tz_str,
             is_business_closed=False,
             closure_reason=None,
+            availability_status=avail_status,
+            status_reason=status_reason,
+            requested_time=normalized_req_time,
+            requested_time_available=req_time_available,
             available_slots=available_slots,
         )
 

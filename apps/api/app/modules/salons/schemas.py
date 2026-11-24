@@ -475,6 +475,17 @@ class SalonHolidayResponse(BaseModel):
 # ============================================================================
 
 
+class SalonAvailabilityStatus(str, Enum):
+    """Explicit diagnostic outcome for salon availability queries."""
+
+    AVAILABLE = "AVAILABLE"
+    REQUESTED_TIME_UNAVAILABLE = "REQUESTED_TIME_UNAVAILABLE"
+    BUSINESS_CLOSED = "BUSINESS_CLOSED"
+    NO_QUALIFIED_STAFF = "NO_QUALIFIED_STAFF"
+    STAFF_SCHEDULE_MISSING = "STAFF_SCHEDULE_MISSING"
+    AVAILABILITY_DATA_ERROR = "AVAILABILITY_DATA_ERROR"
+
+
 class SalonAvailabilitySlot(BaseModel):
     """Single non-conflicting bookable slot for a salon service and staff member."""
 
@@ -501,6 +512,10 @@ class SalonAvailabilityResponse(BaseModel):
     timezone: str
     is_business_closed: bool = False
     closure_reason: Optional[str] = None
+    availability_status: SalonAvailabilityStatus = SalonAvailabilityStatus.AVAILABLE
+    status_reason: Optional[str] = None
+    requested_time: Optional[str] = None
+    requested_time_available: Optional[bool] = None
     available_slots: List[SalonAvailabilitySlot] = Field(default_factory=list)
 
 

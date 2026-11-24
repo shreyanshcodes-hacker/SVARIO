@@ -210,6 +210,7 @@ def execute_check_salon_availability(
                 service_id=svc_uuid,
                 requested_date=req_date,
                 staff_id=staff_uuid,
+                requested_time=validated.requested_time,
                 business_hours_override=bundle.hours,
             )
         )
@@ -234,6 +235,10 @@ def execute_check_salon_availability(
         timezone=avail.timezone,
         is_business_closed=avail.is_business_closed,
         closure_reason=avail.closure_reason,
+        availability_status=avail.availability_status.value,
+        status_reason=avail.status_reason,
+        requested_time=avail.requested_time,
+        requested_time_available=avail.requested_time_available,
         available_slots=slot_items,
         total_slots_available=len(slot_items),
     )

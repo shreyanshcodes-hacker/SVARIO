@@ -359,6 +359,10 @@ def build_realtime_tool_definitions(
                         "type": "string",
                         "description": "Optional UUID of preferred stylist.",
                     },
+                    "requested_time": {
+                        "type": "string",
+                        "description": "Optional preferred time (e.g. '14:00' or '2:00 PM') to check directly.",
+                    },
                 },
                 "required": ["service_id", "requested_date"],
                 "additionalProperties": False,
