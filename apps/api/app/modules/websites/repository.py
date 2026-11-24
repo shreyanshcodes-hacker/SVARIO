@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Dict, Optional, Protocol, Tuple
 from uuid import UUID, uuid4
 import httpx
 from fastapi import Depends, HTTPException, status
@@ -13,6 +13,7 @@ from app.modules.websites.schemas import (
     BookingWebsiteButtonStyle,
     BookingWebsiteFontFamily,
     BookingWebsiteStatus,
+    BookingWebsiteTemplateId,
     BookingWebsiteTheme,
 )
 
@@ -27,6 +28,11 @@ class BookingWebsiteRecord:
         self.organization_id: UUID = UUID(str(data["organization_id"]))
         self.business_id: UUID = UUID(str(data["business_id"]))
         self.slug: str = str(data["slug"])
+        raw_template = str(data.get("template_id") or BookingWebsiteTemplateId.LUXE_STUDIO.value)
+        try:
+            self.template_id: BookingWebsiteTemplateId = BookingWebsiteTemplateId(raw_template)
+        except ValueError:
+            self.template_id = BookingWebsiteTemplateId.LUXE_STUDIO
         self.status: BookingWebsiteStatus = BookingWebsiteStatus(str(data["status"]))
         self.published_at: Optional[datetime] = _parse_dt(data.get("published_at"))
         self.headline: Optional[str] = data.get("headline")
@@ -96,6 +102,16 @@ class BookingWebsiteRepositoryProtocol(Protocol):
         data: bytes,
     ) -> str: ...
 
+    async def resolve_asset_url(
+        self, actor: AuthenticatedUser, storage_path: Optional[str]
+    ) -> Optional[str]: ...
+
+    async def get_published_by_slug(self, slug: str) -> Optional[Dict[str, Any]]: ...
+
+    async def fetch_published_brand_asset(
+        self, storage_path: str
+    ) -> Optional[Tuple[bytes, str]]: ...
+
     def build_public_asset_url(self, storage_path: Optional[str]) -> Optional[str]: ...
 
 
@@ -105,10 +121,12 @@ class InMemoryBookingWebsiteRepository:
     def __init__(self) -> None:
         self._records_by_business: Dict[UUID, Dict[str, Any]] = {}
         self._assets: Dict[str, bytes] = {}
+        self._asset_content_types: Dict[str, str] = {}
 
     def clear(self) -> None:
         self._records_by_business.clear()
         self._assets.clear()
+        self._asset_content_types.clear()
 
     async def get_by_business(
         self, actor: AuthenticatedUser, organization_id: UUID, business_id: UUID
@@ -184,7 +202,39 @@ class InMemoryBookingWebsiteRepository:
         data: bytes,
     ) -> str:
         self._assets[storage_path] = data
+        self._asset_content_types[storage_path] = content_type
         return self.build_public_asset_url(storage_path) or ""
+
+    async def resolve_asset_url(
+        self, actor: AuthenticatedUser, storage_path: Optional[str]
+    ) -> Optional[str]:
+        return self.build_public_asset_url(storage_path)
+
+    async def get_published_by_slug(self, slug: str) -> Optional[Dict[str, Any]]:
+        target = slug.strip().lower()
+        for row in self._records_by_business.values():
+            if (
+                str(row.get("slug", "")).strip().lower() == target
+                and str(row.get("status", "")) == BookingWebsiteStatus.PUBLISHED.value
+            ):
+                return dict(row)
+        return None
+
+    async def fetch_published_brand_asset(
+        self, storage_path: str
+    ) -> Optional[Tuple[bytes, str]]:
+        # Only serve assets that currently belong to a PUBLISHED website record
+        is_published = any(
+            str(row.get("status", "")) == BookingWebsiteStatus.PUBLISHED.value
+            and (row.get("logo_path") == storage_path or row.get("cover_image_path") == storage_path)
+            for row in self._records_by_business.values()
+        )
+        if not is_published:
+            return None
+        data = self._assets.get(storage_path)
+        if data is None:
+            return None
+        return data, self._asset_content_types.get(storage_path, "image/png")
 
     def build_public_asset_url(self, storage_path: Optional[str]) -> Optional[str]:
         if not storage_path:
@@ -200,6 +250,11 @@ class SupabaseRestBookingWebsiteRepository:
             raise RuntimeError("SupabaseRestBookingWebsiteRepository requires SUPABASE_URL and SUPABASE_ANON_KEY.")
         self._base_url = settings.supabase_url.strip().rstrip("/")
         self._anon_key = settings.supabase_anon_key.strip()
+        self._service_role_key = (
+            settings.supabase_service_role_key.strip()
+            if settings.supabase_service_role_key and settings.supabase_service_role_key.strip()
+            else None
+        )
 
     def _headers(self, actor: AuthenticatedUser, *, prefer: str = "return=representation") -> Dict[str, str]:
         if not actor.raw_token:
@@ -265,6 +320,18 @@ class SupabaseRestBookingWebsiteRepository:
         self, actor: AuthenticatedUser, slug: str, *, exclude_business_id: UUID
     ) -> bool:
         async with httpx.AsyncClient(timeout=10.0) as client:
+            rpc_resp = await client.post(
+                f"{self._base_url}/rest/v1/rpc/is_booking_website_slug_taken",
+                headers=self._headers(actor),
+                json={
+                    "p_slug": slug.strip().lower(),
+                    "p_exclude_business_id": str(exclude_business_id),
+                },
+            )
+            if rpc_resp.status_code < 400:
+                return bool(rpc_resp.json())
+
+            # Fallback if Stage 2 RPC migration has not yet been applied
             resp = await client.get(
                 f"{self._base_url}/rest/v1/booking_website_configs",
                 headers=self._headers(actor),
@@ -343,17 +410,97 @@ class SupabaseRestBookingWebsiteRepository:
                 },
                 content=data,
             )
-            if resp.status_code >= 400:
+        if resp.status_code >= 400:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Brand asset upload failed (HTTP {resp.status_code}).",
+            )
+        return (await self.resolve_asset_url(actor, storage_path)) or ""
+
+    async def resolve_asset_url(
+        self, actor: AuthenticatedUser, storage_path: Optional[str]
+    ) -> Optional[str]:
+        if not storage_path or not actor.raw_token:
+            return None
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{self._base_url}/storage/v1/object/sign/{BRAND_ASSETS_BUCKET}/{storage_path}",
+                headers={
+                    "apikey": self._anon_key,
+                    "Authorization": f"Bearer {actor.raw_token}",
+                    "Content-Type": "application/json",
+                },
+                json={"expiresIn": 3600},
+            )
+            if resp.status_code < 400:
+                body = resp.json()
+                signed = body.get("signedURL") or body.get("signedUrl")
+                if isinstance(signed, str) and signed:
+                    if signed.startswith("http"):
+                        return signed
+                    prefix = "/storage/v1" if not signed.startswith("/storage/v1") else ""
+                    return f"{self._base_url}{prefix}{signed}"
+        return None
+
+    async def get_published_by_slug(self, slug: str) -> Optional[Dict[str, Any]]:
+        """Resolve a published salon website via strictly allowlisted SECURITY DEFINER RPC."""
+        bearer = self._service_role_key or self._anon_key
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{self._base_url}/rest/v1/rpc/get_published_booking_website_by_slug",
+                headers={
+                    "apikey": self._anon_key,
+                    "Authorization": f"Bearer {bearer}",
+                    "Content-Type": "application/json",
+                },
+                json={"p_slug": slug.strip().lower()},
+            )
+        if resp.status_code >= 400:
+            try:
+                body = resp.json()
+            except Exception:
+                body = {}
+            pg_code = str(body.get("code") or "")
+            if pg_code in {"42883", "PGRST202"}:
                 raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=f"Brand asset upload failed (HTTP {resp.status_code}). Ensure migration 20261124000008 is applied.",
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Stage 2 public website migration (20261124000009_stage8_booking_website_templates_and_public_rpc.sql) has not been applied to Supabase yet.",
                 )
-        return self.build_public_asset_url(storage_path) or ""
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Unable to resolve public booking website right now.",
+            )
+        payload = resp.json()
+        if not payload or not isinstance(payload, dict):
+            return None
+        return payload
+
+    async def fetch_published_brand_asset(
+        self, storage_path: str
+    ) -> Optional[Tuple[bytes, str]]:
+        """Stream a published website's brand asset from the private salon-brand-assets bucket."""
+        if not storage_path:
+            return None
+        bearer = self._service_role_key or self._anon_key
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{self._base_url}/storage/v1/object/{BRAND_ASSETS_BUCKET}/{storage_path}",
+                headers={
+                    "apikey": self._anon_key,
+                    "Authorization": f"Bearer {bearer}",
+                },
+            )
+        if resp.status_code >= 400:
+            return None
+        content_type = (resp.headers.get("content-type") or "image/png").split(";")[0].strip().lower()
+        if content_type not in {"image/png", "image/jpeg", "image/webp"}:
+            content_type = "image/png"
+        return resp.content, content_type
 
     def build_public_asset_url(self, storage_path: Optional[str]) -> Optional[str]:
         if not storage_path:
             return None
-        return f"{self._base_url}/storage/v1/object/public/{BRAND_ASSETS_BUCKET}/{storage_path}"
+        return f"{self._base_url}/storage/v1/object/authenticated/{BRAND_ASSETS_BUCKET}/{storage_path}"
 
 
 _in_memory_website_repo = InMemoryBookingWebsiteRepository()

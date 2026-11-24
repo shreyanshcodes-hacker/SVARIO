@@ -1103,6 +1103,7 @@ import type {
   BookingWebsiteConfig,
   BookingWebsiteDraftUpdatePayload,
   BrandAssetUploadResult,
+  PublicBookingWebsiteData,
   SlugAvailabilityResult,
 } from "@/types/website";
 
@@ -1193,4 +1194,35 @@ export async function unpublishBookingWebsite(
   });
   if (!res.ok) throw new Error(await parseApiError(res));
   return (await res.json()) as BookingWebsiteConfig;
+}
+
+export async function fetchPublicBookingWebsite(
+  slug: string
+): Promise<PublicBookingWebsiteData | null> {
+  const apiBase = getApiBaseUrl();
+  const res = await fetch(
+    `${apiBase}/api/v1/public/websites/${encodeURIComponent(slug)}`,
+    {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    }
+  );
+  if (res.status === 404) {
+    return null;
+  }
+  if (!res.ok) {
+    throw new Error(await parseApiError(res));
+  }
+  const data = (await res.json()) as PublicBookingWebsiteData;
+  const resolveUrl = (url: string | null): string | null => {
+    if (!url) return null;
+    if (url.startsWith("http://") || url.startsWith("https://")) return url;
+    return `${apiBase}${url}`;
+  };
+  return {
+    ...data,
+    logo_url: resolveUrl(data.logo_url),
+    cover_image_url: resolveUrl(data.cover_image_url),
+  };
 }

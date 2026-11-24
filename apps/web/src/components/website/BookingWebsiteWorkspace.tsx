@@ -7,6 +7,7 @@ import {
   fetchBookingWebsiteConfig,
   fetchOnboardingBundle,
   fetchSalonServices,
+  publishBookingWebsite,
   saveBookingWebsiteDraft,
   unpublishBookingWebsite,
   updateAssistantSettingsApi,
@@ -25,13 +26,19 @@ import type {
   BookingWebsiteButtonStyleType,
   BookingWebsiteConfig,
   BookingWebsiteFontFamilyType,
+  BookingWebsiteTemplateId,
   BookingWebsiteThemeType,
+  PublicBookingWebsiteData,
   SlugAvailabilityResult,
 } from "@/types/website";
+import { TemplateGallery } from "@/components/booking-website/TemplateGallery";
+import { TemplatePreview } from "@/components/booking-website/TemplatePreview";
+import { resolveTemplateEntry } from "@/components/booking-website/template-registry";
 import { BookingWebsiteLivePreview } from "./BookingWebsiteLivePreview";
 
 type SectionId =
   | "overview"
+  | "templates"
   | "profile"
   | "brand"
   | "url"
@@ -40,11 +47,12 @@ type SectionId =
 
 const SIDEBAR_ITEMS: readonly { id: SectionId; label: string; subtitle: string }[] = [
   { id: "overview", label: "Website Overview", subtitle: "Status & readiness" },
+  { id: "templates", label: "Website Templates", subtitle: "8 distinct salon designs" },
   { id: "profile", label: "Business Profile", subtitle: "Contact, location & social" },
   { id: "brand", label: "Brand Studio", subtitle: "Colors, logo & typography" },
   { id: "url", label: "Website URL", subtitle: "Unique /s/ slug" },
   { id: "receptionist", label: "AI Receptionist", subtitle: "Voice persona & languages" },
-  { id: "publish", label: "Preview & Publishing", subtitle: "Draft & Stage 2 guard" },
+  { id: "publish", label: "Preview & Publishing", subtitle: "Full preview & go live" },
 ];
 
 const FONT_OPTIONS: readonly { id: BookingWebsiteFontFamilyType; label: string }[] = [
@@ -88,6 +96,8 @@ export function BookingWebsiteWorkspace({
   const [services, setServices] = useState<SalonService[]>([]);
 
   // Website & Brand Studio state
+  const [templateId, setTemplateId] = useState<BookingWebsiteTemplateId>("luxe_studio");
+  const [previewTemplateId, setPreviewTemplateId] = useState<BookingWebsiteTemplateId | null>(null);
   const [slugInput, setSlugInput] = useState<string>("");
   const [slugCheck, setSlugCheck] = useState<SlugAvailabilityResult | null>(null);
   const [checkingSlug, setCheckingSlug] = useState<boolean>(false);
@@ -134,6 +144,7 @@ export function BookingWebsiteWorkspace({
     (cfg: BookingWebsiteConfig, ob: OnboardingBundleData) => {
       setConfig(cfg);
       setBundle(ob);
+      setTemplateId(resolveTemplateEntry(cfg.template_id).id);
       setSlugInput(cfg.slug);
       setHeadline(cfg.headline ?? "");
       setTagline(cfg.tagline ?? "");
@@ -205,6 +216,7 @@ export function BookingWebsiteWorkspace({
     try {
       const updated = await saveBookingWebsiteDraft(accessToken, organizationId, {
         slug: slugInput.trim() || undefined,
+        template_id: templateId,
         headline: headline.trim() || null,
         tagline: tagline.trim() || null,
         primary_color: primaryColor,
@@ -348,6 +360,46 @@ export function BookingWebsiteWorkspace({
     }
   };
 
+  const handleSelectTemplate = async (nextTemplateId: BookingWebsiteTemplateId) => {
+    if (!isOwnerOrAdmin) return;
+    setTemplateId(nextTemplateId);
+    setSaving(true);
+    setError(null);
+    setSaveNotice(null);
+    try {
+      const updated = await saveBookingWebsiteDraft(accessToken, organizationId, {
+        template_id: nextTemplateId,
+      });
+      setConfig(updated);
+      setTemplateId(resolveTemplateEntry(updated.template_id).id);
+      setSaveNotice(
+        `Template "${resolveTemplateEntry(nextTemplateId).name}" saved to draft. Your branding, logo, and services were preserved.`
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to save template selection.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handlePublish = async () => {
+    if (!isOwnerOrAdmin) return;
+    setSaving(true);
+    setError(null);
+    setSaveNotice(null);
+    try {
+      const updated = await publishBookingWebsite(accessToken, organizationId);
+      setConfig(updated);
+      setSaveNotice(
+        `Booking website published! Live public URL: ${updated.public_url_path ?? `/s/${updated.slug}`}`
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to publish booking website.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleUnpublish = async () => {
     if (!isOwnerOrAdmin) return;
     setSaving(true);
@@ -374,6 +426,60 @@ export function BookingWebsiteWorkspace({
       return [...prev, lang];
     });
   };
+
+  const buildPreviewData = (targetTemplateId: BookingWebsiteTemplateId): PublicBookingWebsiteData => ({
+    slug: slugInput || config?.slug || "your-salon",
+    template_id: targetTemplateId,
+    published_at: config?.published_at ?? null,
+    headline: headline || null,
+    tagline: tagline || null,
+    logo_url: config?.logo_url ?? null,
+    cover_image_url: config?.cover_image_url ?? null,
+    primary_color: primaryColor,
+    secondary_color: secondaryColor,
+    accent_color: accentColor,
+    background_color: backgroundColor,
+    text_color: textColor,
+    theme,
+    font_family: fontFamily,
+    button_style: buttonStyle,
+    social_instagram: socialInstagram || null,
+    social_facebook: socialFacebook || null,
+    social_whatsapp: socialWhatsapp || null,
+    show_services: showServices,
+    show_hours: showHours,
+    show_ai_receptionist: showAiReceptionist,
+    business: {
+      display_name: displayName || organizationName,
+      description: description || null,
+      phone: phone || null,
+      email: email || null,
+      address: address || null,
+      city: city || null,
+      state: bundle?.profile.state ?? null,
+      country: bundle?.profile.country ?? null,
+      timezone: timezone || "Asia/Kolkata",
+    },
+    hours: showHours ? bundle?.hours.schedule ?? [] : [],
+    services: showServices
+      ? services
+          .filter((s) => s.is_active)
+          .map((s) => ({
+            id: s.id,
+            name: s.name,
+            category: s.category ?? null,
+            description: s.description ?? null,
+            duration_minutes: s.duration_minutes,
+            price: s.price,
+            currency: s.currency || "INR",
+          }))
+      : [],
+    receptionist: {
+      enabled: showAiReceptionist && assistantEnabled,
+      assistant_name: showAiReceptionist && assistantEnabled ? assistantName : null,
+      greeting: showAiReceptionist && assistantEnabled ? greeting : null,
+    },
+  });
 
   if (loading) {
     return (
@@ -468,11 +574,22 @@ export function BookingWebsiteWorkspace({
                 </span>
                 <button
                   type="button"
-                  onClick={() => setActiveSection("publish")}
+                  data-testid="overview-full-preview-button"
+                  onClick={() => setPreviewTemplateId(templateId)}
                   className="rounded-xl border border-[#36C6D3]/50 bg-[#36C6D3]/15 px-3.5 py-1.5 text-xs font-semibold text-[#36C6D3] hover:bg-[#36C6D3]/25"
                 >
                   Open Live Preview
                 </button>
+                {config.status === "published" && config.public_url_path && (
+                  <Link
+                    href={config.public_url_path}
+                    target="_blank"
+                    data-testid="overview-public-url-link"
+                    className="rounded-xl border border-emerald-400/50 bg-emerald-500/15 px-3.5 py-1.5 text-xs font-semibold text-emerald-200 hover:bg-emerald-500/25"
+                  >
+                    Visit Live Site ↗
+                  </Link>
+                )}
               </div>
             </div>
 
@@ -482,15 +599,15 @@ export function BookingWebsiteWorkspace({
                 <p className="mt-1 text-sm font-bold text-[#F5F7FC]">{displayName}</p>
               </div>
               <div className="rounded-xl border border-white/10 bg-[#0B1020]/75 p-4">
-                <p className="font-mono text-[10px] uppercase text-[#A7B0C4]">Reserved URL Path</p>
+                <p className="font-mono text-[10px] uppercase text-[#A7B0C4]">Public URL Path</p>
                 <p className="mt-1 font-mono text-xs text-[#36C6D3]">
-                  {config.public_url_path ?? `${config.preview_url_path} (Pending Stage 2)`}
+                  {config.public_url_path ?? `${config.preview_url_path} (Draft)`}
                 </p>
               </div>
               <div className="rounded-xl border border-white/10 bg-[#0B1020]/75 p-4">
-                <p className="font-mono text-[10px] uppercase text-[#A7B0C4]">Last Updated</p>
-                <p className="mt-1 text-xs text-[#F5F7FC]">
-                  {new Date(config.updated_at).toLocaleString()}
+                <p className="font-mono text-[10px] uppercase text-[#A7B0C4]">Selected Template</p>
+                <p className="mt-1 text-xs font-semibold text-[#F5F7FC]">
+                  {resolveTemplateEntry(templateId).name}
                 </p>
               </div>
             </div>
@@ -527,10 +644,15 @@ export function BookingWebsiteWorkspace({
                 <button
                   type="button"
                   data-testid="overview-publish-button"
-                  disabled={!config.publish_readiness.can_publish || !isOwnerOrAdmin}
-                  className="rounded-xl bg-[#7657F6] px-4 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45"
+                  disabled={!config.publish_readiness.can_publish || !isOwnerOrAdmin || saving}
+                  onClick={() => void handlePublish()}
+                  className="rounded-xl bg-[#7657F6] px-4 py-2 text-xs font-semibold text-white transition hover:bg-[#6546e6] disabled:cursor-not-allowed disabled:opacity-45"
                 >
-                  Publish Website (Pending Stage 2)
+                  {config.status === "published"
+                    ? "Published"
+                    : config.publish_readiness.can_publish
+                    ? "Publish Website"
+                    : "Complete Requirements to Publish"}
                 </button>
               </div>
               {config.publish_readiness.missing_requirements.length > 0 && (
@@ -542,6 +664,17 @@ export function BookingWebsiteWorkspace({
               )}
             </div>
           </section>
+        )}
+
+        {/* 1B. WEBSITE TEMPLATES (8 DISTINCT DESIGNS) */}
+        {activeSection === "templates" && config && (
+          <TemplateGallery
+            selectedTemplateId={templateId}
+            salonName={displayName}
+            isOwnerOrAdmin={isOwnerOrAdmin}
+            onSelectTemplate={(nextId) => void handleSelectTemplate(nextId)}
+            onPreviewTemplate={(nextId) => setPreviewTemplateId(nextId)}
+          />
         )}
 
         {/* 2. BUSINESS PROFILE */}
@@ -1058,6 +1191,14 @@ export function BookingWebsiteWorkspace({
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
+                  data-testid="open-full-page-preview-button"
+                  onClick={() => setPreviewTemplateId(templateId)}
+                  className="rounded-xl border border-[#36C6D3]/50 bg-[#36C6D3]/15 px-4 py-2 text-xs font-semibold text-[#36C6D3] hover:bg-[#36C6D3]/25"
+                >
+                  Full-Page Preview
+                </button>
+                <button
+                  type="button"
                   disabled={!isOwnerOrAdmin || saving}
                   onClick={() => void handleSaveWebsiteDraft()}
                   className="rounded-xl border border-white/15 bg-[#0B1020] px-4 py-2 text-xs font-semibold text-[#F5F7FC] hover:border-[#36C6D3]/50 disabled:opacity-45"
@@ -1067,15 +1208,16 @@ export function BookingWebsiteWorkspace({
                 <button
                   type="button"
                   data-testid="publish-website-button"
-                  disabled={!config.publish_readiness.can_publish || !isOwnerOrAdmin}
-                  className="rounded-xl bg-[#7657F6] px-4 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45"
+                  disabled={!config.publish_readiness.can_publish || !isOwnerOrAdmin || saving}
+                  onClick={() => void handlePublish()}
+                  className="rounded-xl bg-[#7657F6] px-4 py-2 text-xs font-semibold text-white transition hover:bg-[#6546e6] disabled:cursor-not-allowed disabled:opacity-45"
                 >
-                  Publish Website (Pending Stage 2)
+                  {saving ? "Working..." : config.status === "published" ? "Republish Website" : "Publish Website"}
                 </button>
                 <button
                   type="button"
                   data-testid="unpublish-website-button"
-                  disabled={!isOwnerOrAdmin || config.status !== "published"}
+                  disabled={!isOwnerOrAdmin || config.status !== "published" || saving}
                   onClick={() => setShowUnpublishConfirm(true)}
                   className="rounded-xl border border-rose-500/40 bg-rose-500/15 px-4 py-2 text-xs font-semibold text-rose-200 disabled:cursor-not-allowed disabled:opacity-40"
                 >
@@ -1138,6 +1280,18 @@ export function BookingWebsiteWorkspace({
           </section>
         )}
       </div>
+
+      {/* Full-Page Responsive Template Preview Modal */}
+      {previewTemplateId && (
+        <TemplatePreview
+          data={buildPreviewData(previewTemplateId)}
+          isOpen={previewTemplateId !== null}
+          isOwnerOrAdmin={isOwnerOrAdmin}
+          isCurrentlySelected={previewTemplateId === templateId}
+          onClose={() => setPreviewTemplateId(null)}
+          onApplyTemplate={(nextId) => void handleSelectTemplate(nextId)}
+        />
+      )}
     </div>
   );
 }

@@ -1,12 +1,13 @@
-"""API routes for White-Label Booking Website Engine (Stage 1 Dashboard Foundation)."""
+"""API routes for White-Label Booking Website Engine (Stage 1 Dashboard + Stage 2 Public Engine)."""
 
 from uuid import UUID
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 from app.core.auth import AuthenticatedUser, get_current_user
 from app.modules.websites.schemas import (
     BookingWebsiteConfigResponse,
     BookingWebsiteDraftUpdateRequest,
     BrandAssetUploadResponse,
+    PublicBookingWebsiteResponse,
     SlugAvailabilityResponse,
 )
 from app.modules.websites.service import (
@@ -16,8 +17,22 @@ from app.modules.websites.service import (
 
 router = APIRouter(
     prefix="/api/v1/organizations/{organization_id}/booking-website",
-    tags=["Booking Website (Stage 1)"],
+    tags=["Booking Website (Stage 1–2)"],
 )
+
+public_router = APIRouter(
+    prefix="/api/v1/public/websites",
+    tags=["Public Booking Website (Stage 2)"],
+)
+
+
+def _extract_client_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip() or "unknown"
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
 
 
 @router.get(
@@ -123,4 +138,46 @@ async def unpublish_booking_website(
 ) -> BookingWebsiteConfigResponse:
     return await service.unpublish_website(
         actor=actor, organization_id=organization_id
+    )
+
+
+@public_router.get(
+    "/{slug}",
+    response_model=PublicBookingWebsiteResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Resolve a published salon booking website by slug (allowlisted public fields only)",
+)
+async def get_public_booking_website(
+    slug: str,
+    request: Request,
+    service: BookingWebsiteService = Depends(get_booking_website_service),
+) -> PublicBookingWebsiteResponse:
+    return await service.get_public_website_by_slug(
+        slug=slug, client_ip=_extract_client_ip(request)
+    )
+
+
+@public_router.get(
+    "/{slug}/assets/{asset_type}",
+    status_code=status.HTTP_200_OK,
+    summary="Stream a published salon website's logo or cover image from private Storage",
+)
+async def get_public_booking_website_asset(
+    slug: str,
+    asset_type: str,
+    request: Request,
+    service: BookingWebsiteService = Depends(get_booking_website_service),
+) -> Response:
+    data, content_type = await service.get_public_website_asset(
+        slug=slug,
+        asset_type=asset_type,
+        client_ip=_extract_client_ip(request),
+    )
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "public, max-age=300",
+        },
     )

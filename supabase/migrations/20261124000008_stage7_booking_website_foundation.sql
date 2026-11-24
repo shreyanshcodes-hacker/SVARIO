@@ -106,12 +106,12 @@ CREATE POLICY booking_website_configs_delete_owner_or_admin
     ON public.booking_website_configs FOR DELETE TO authenticated
     USING (public.has_org_role(organization_id, ARRAY['owner', 'admin']));
 
--- Create tenant-scoped Storage bucket for approved salon brand assets (logos/covers)
+-- Create private tenant-scoped Storage bucket for approved salon brand assets (logos/covers)
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES (
     'salon-brand-assets',
     'salon-brand-assets',
-    TRUE,
+    FALSE,
     2097152,
     ARRAY['image/png', 'image/jpeg', 'image/webp']
 )
@@ -121,11 +121,22 @@ SET
     file_size_limit = EXCLUDED.file_size_limit,
     allowed_mime_types = EXCLUDED.allowed_mime_types;
 
--- Storage RLS policies: path convention `<organization_id>/<business_id>/<filename>`
+-- Storage RLS policies: strict path convention `<organization_id>/<business_id>/<filename>`
 DROP POLICY IF EXISTS salon_brand_assets_public_read ON storage.objects;
-CREATE POLICY salon_brand_assets_public_read
-    ON storage.objects FOR SELECT TO public
-    USING (bucket_id = 'salon-brand-assets');
+DROP POLICY IF EXISTS salon_brand_assets_select_member ON storage.objects;
+CREATE POLICY salon_brand_assets_select_member
+    ON storage.objects FOR SELECT TO authenticated
+    USING (
+        bucket_id = 'salon-brand-assets'
+        AND (storage.foldername(name))[1] ~ '^[0-9a-fA-F-]{36}$'
+        AND (storage.foldername(name))[2] ~ '^[0-9a-fA-F-]{36}$'
+        AND public.is_org_member(((storage.foldername(name))[1])::uuid)
+        AND EXISTS (
+            SELECT 1 FROM public.businesses b
+            WHERE b.id = ((storage.foldername(name))[2])::uuid
+              AND b.organization_id = ((storage.foldername(name))[1])::uuid
+        )
+    );
 
 DROP POLICY IF EXISTS salon_brand_assets_insert_owner_or_admin ON storage.objects;
 CREATE POLICY salon_brand_assets_insert_owner_or_admin
@@ -133,7 +144,13 @@ CREATE POLICY salon_brand_assets_insert_owner_or_admin
     WITH CHECK (
         bucket_id = 'salon-brand-assets'
         AND (storage.foldername(name))[1] ~ '^[0-9a-fA-F-]{36}$'
+        AND (storage.foldername(name))[2] ~ '^[0-9a-fA-F-]{36}$'
         AND public.has_org_role(((storage.foldername(name))[1])::uuid, ARRAY['owner', 'admin'])
+        AND EXISTS (
+            SELECT 1 FROM public.businesses b
+            WHERE b.id = ((storage.foldername(name))[2])::uuid
+              AND b.organization_id = ((storage.foldername(name))[1])::uuid
+        )
     );
 
 DROP POLICY IF EXISTS salon_brand_assets_update_owner_or_admin ON storage.objects;
@@ -142,7 +159,24 @@ CREATE POLICY salon_brand_assets_update_owner_or_admin
     USING (
         bucket_id = 'salon-brand-assets'
         AND (storage.foldername(name))[1] ~ '^[0-9a-fA-F-]{36}$'
+        AND (storage.foldername(name))[2] ~ '^[0-9a-fA-F-]{36}$'
         AND public.has_org_role(((storage.foldername(name))[1])::uuid, ARRAY['owner', 'admin'])
+        AND EXISTS (
+            SELECT 1 FROM public.businesses b
+            WHERE b.id = ((storage.foldername(name))[2])::uuid
+              AND b.organization_id = ((storage.foldername(name))[1])::uuid
+        )
+    )
+    WITH CHECK (
+        bucket_id = 'salon-brand-assets'
+        AND (storage.foldername(name))[1] ~ '^[0-9a-fA-F-]{36}$'
+        AND (storage.foldername(name))[2] ~ '^[0-9a-fA-F-]{36}$'
+        AND public.has_org_role(((storage.foldername(name))[1])::uuid, ARRAY['owner', 'admin'])
+        AND EXISTS (
+            SELECT 1 FROM public.businesses b
+            WHERE b.id = ((storage.foldername(name))[2])::uuid
+              AND b.organization_id = ((storage.foldername(name))[1])::uuid
+        )
     );
 
 DROP POLICY IF EXISTS salon_brand_assets_delete_owner_or_admin ON storage.objects;
@@ -151,7 +185,13 @@ CREATE POLICY salon_brand_assets_delete_owner_or_admin
     USING (
         bucket_id = 'salon-brand-assets'
         AND (storage.foldername(name))[1] ~ '^[0-9a-fA-F-]{36}$'
+        AND (storage.foldername(name))[2] ~ '^[0-9a-fA-F-]{36}$'
         AND public.has_org_role(((storage.foldername(name))[1])::uuid, ARRAY['owner', 'admin'])
+        AND EXISTS (
+            SELECT 1 FROM public.businesses b
+            WHERE b.id = ((storage.foldername(name))[2])::uuid
+              AND b.organization_id = ((storage.foldername(name))[1])::uuid
+        )
     );
 
 COMMIT;

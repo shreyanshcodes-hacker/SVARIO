@@ -89,6 +89,19 @@ class BookingWebsiteButtonStyle(str, Enum):
     SQUARE = "square"
 
 
+class BookingWebsiteTemplateId(str, Enum):
+    """Explicit server-controlled registry of approved Stage 2 salon website templates."""
+
+    LUXE_STUDIO = "luxe_studio"
+    MINIMAL_ELEGANCE = "minimal_elegance"
+    BLUSH_BEAUTY = "blush_beauty"
+    NOIR_SALON = "noir_salon"
+    ORGANIC_GLOW = "organic_glow"
+    URBAN_CHIC = "urban_chic"
+    EDITORIAL_PRO = "editorial_pro"
+    CLASSIC_BEAUTY = "classic_beauty"
+
+
 def normalize_website_slug(raw: str) -> str:
     """Normalize a raw slug string into lowercase kebab-case and validate format/reserved names."""
     cleaned = re.sub(r"[^a-z0-9]+", "-", (raw or "").strip().lower()).strip("-")
@@ -145,12 +158,12 @@ class BookingWebsitePublishReadiness(BaseModel):
     """Validation summary indicating whether a salon website meets publishing prerequisites."""
 
     is_valid: bool
-    public_engine_ready: bool = False
+    public_engine_ready: bool = True
     can_publish: bool = False
     missing_requirements: List[str] = Field(default_factory=list)
     stage_notice: str = (
-        "Stage 1 Foundation: Draft, branding preview, and slug reservation are active. "
-        "Public customer-facing website publishing (/s/[slug]) is pending Stage 2."
+        "Stage 2 Dynamic Engine: Select from 8 templates, preview with your live salon data, "
+        "and publish to your public /s/[slug] URL when ready."
     )
 
 
@@ -161,6 +174,7 @@ class BookingWebsiteConfigResponse(BaseModel):
     organization_id: UUID
     business_id: UUID
     slug: str
+    template_id: BookingWebsiteTemplateId = BookingWebsiteTemplateId.LUXE_STUDIO
     status: BookingWebsiteStatus
     published_at: Optional[datetime] = None
     headline: Optional[str] = None
@@ -196,6 +210,7 @@ class BookingWebsiteDraftUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     slug: Optional[str] = Field(default=None, min_length=3, max_length=80)
+    template_id: Optional[BookingWebsiteTemplateId] = None
     headline: Optional[str] = Field(default=None, max_length=140)
     tagline: Optional[str] = Field(default=None, max_length=240)
     primary_color: Optional[str] = None
@@ -266,3 +281,77 @@ class BrandAssetUploadResponse(BaseModel):
     public_url: str
     content_type: str
     size_bytes: int
+
+
+class PublicBusinessProfile(BaseModel):
+    """Strictly allowlisted public salon profile fields for /s/[slug]."""
+
+    display_name: str
+    description: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
+    timezone: str = "Asia/Kolkata"
+
+
+class PublicBusinessHour(BaseModel):
+    """Publicly visible operating hours for a weekday (0=Sunday..6=Saturday)."""
+
+    weekday: int
+    is_closed: bool
+    opens_at: Optional[str] = None
+    closes_at: Optional[str] = None
+    is_overnight: bool = False
+
+
+class PublicSalonService(BaseModel):
+    """Strictly allowlisted active public salon service item."""
+
+    id: UUID
+    name: str
+    category: Optional[str] = None
+    description: Optional[str] = None
+    duration_minutes: int
+    price: float
+    currency: str = "INR"
+
+
+class PublicReceptionistInfo(BaseModel):
+    """Safe public AI receptionist metadata (never exposes internal prompts or secrets)."""
+
+    enabled: bool = False
+    assistant_name: Optional[str] = None
+    greeting: Optional[str] = None
+
+
+class PublicBookingWebsiteResponse(BaseModel):
+    """Strictly allowlisted public website payload returned by GET /api/v1/public/websites/{slug}."""
+
+    slug: str
+    template_id: BookingWebsiteTemplateId = BookingWebsiteTemplateId.LUXE_STUDIO
+    published_at: Optional[datetime] = None
+    headline: Optional[str] = None
+    tagline: Optional[str] = None
+    logo_url: Optional[str] = None
+    cover_image_url: Optional[str] = None
+    primary_color: str = "#7657F6"
+    secondary_color: str = "#36C6D3"
+    accent_color: str = "#F59E0B"
+    background_color: str = "#0B1020"
+    text_color: str = "#F5F7FC"
+    theme: BookingWebsiteTheme = BookingWebsiteTheme.DARK
+    font_family: BookingWebsiteFontFamily = BookingWebsiteFontFamily.INTER
+    button_style: BookingWebsiteButtonStyle = BookingWebsiteButtonStyle.ROUNDED
+    social_instagram: Optional[str] = None
+    social_facebook: Optional[str] = None
+    social_whatsapp: Optional[str] = None
+    show_services: bool = True
+    show_hours: bool = True
+    show_ai_receptionist: bool = True
+    business: PublicBusinessProfile
+    hours: List[PublicBusinessHour] = Field(default_factory=list)
+    services: List[PublicSalonService] = Field(default_factory=list)
+    receptionist: PublicReceptionistInfo = Field(default_factory=PublicReceptionistInfo)

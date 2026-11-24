@@ -8,6 +8,27 @@ export type BookingWebsiteFontFamilyType =
   | "poppins";
 export type BookingWebsiteButtonStyleType = "rounded" | "pill" | "square";
 
+export type BookingWebsiteTemplateId =
+  | "luxe_studio"
+  | "minimal_elegance"
+  | "blush_beauty"
+  | "noir_salon"
+  | "organic_glow"
+  | "urban_chic"
+  | "editorial_pro"
+  | "classic_beauty";
+
+export const APPROVED_TEMPLATE_IDS: readonly BookingWebsiteTemplateId[] = [
+  "luxe_studio",
+  "minimal_elegance",
+  "blush_beauty",
+  "noir_salon",
+  "organic_glow",
+  "urban_chic",
+  "editorial_pro",
+  "classic_beauty",
+] as const;
+
 export interface BookingWebsitePublishReadiness {
   is_valid: boolean;
   public_engine_ready: boolean;
@@ -21,6 +42,7 @@ export interface BookingWebsiteConfig {
   organization_id: string;
   business_id: string;
   slug: string;
+  template_id: BookingWebsiteTemplateId;
   status: BookingWebsiteStatusType;
   published_at: string | null;
   headline: string | null;
@@ -52,6 +74,7 @@ export interface BookingWebsiteConfig {
 
 export interface BookingWebsiteDraftUpdatePayload {
   slug?: string;
+  template_id?: BookingWebsiteTemplateId;
   headline?: string | null;
   tagline?: string | null;
   primary_color?: string;
@@ -83,4 +106,68 @@ export interface BrandAssetUploadResult {
   public_url: string;
   content_type: string;
   size_bytes: number;
+}
+
+export interface PublicBusinessProfileData {
+  display_name: string;
+  description: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  timezone: string;
+}
+
+export interface PublicBusinessHourItem {
+  weekday: number;
+  is_closed: boolean;
+  opens_at: string | null;
+  closes_at: string | null;
+  is_overnight: boolean;
+}
+
+export interface PublicSalonServiceItem {
+  id: string;
+  name: string;
+  category: string | null;
+  description: string | null;
+  duration_minutes: number;
+  price: number;
+  currency: string;
+}
+
+export interface PublicReceptionistData {
+  enabled: boolean;
+  assistant_name: string | null;
+  greeting: string | null;
+}
+
+export interface PublicBookingWebsiteData {
+  slug: string;
+  template_id: BookingWebsiteTemplateId;
+  published_at: string | null;
+  headline: string | null;
+  tagline: string | null;
+  logo_url: string | null;
+  cover_image_url: string | null;
+  primary_color: string;
+  secondary_color: string;
+  accent_color: string;
+  background_color: string;
+  text_color: string;
+  theme: BookingWebsiteThemeType;
+  font_family: BookingWebsiteFontFamilyType;
+  button_style: BookingWebsiteButtonStyleType;
+  social_instagram: string | null;
+  social_facebook: string | null;
+  social_whatsapp: string | null;
+  show_services: boolean;
+  show_hours: boolean;
+  show_ai_receptionist: boolean;
+  business: PublicBusinessProfileData;
+  hours: PublicBusinessHourItem[];
+  services: PublicSalonServiceItem[];
+  receptionist: PublicReceptionistData;
 }

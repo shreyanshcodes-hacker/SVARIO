@@ -1,9 +1,12 @@
-"""Domain service for White-Label Booking Website Engine (Stage 1 Foundation)."""
+"""Domain service for White-Label Booking Website Engine (Stage 1 + Stage 2 Dynamic Public Engine)."""
 
 from __future__ import annotations
 
+from collections import deque
+from datetime import datetime, timezone
 import re
-from typing import Dict, List, Optional
+import time
+from typing import Any, Deque, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 from fastapi import Depends, HTTPException, status
 from app.core.auth import AuthenticatedUser
@@ -17,11 +20,20 @@ from app.modules.websites.repository import (
     get_booking_website_repository,
 )
 from app.modules.websites.schemas import (
+    BookingWebsiteButtonStyle,
     BookingWebsiteConfigResponse,
     BookingWebsiteDraftUpdateRequest,
+    BookingWebsiteFontFamily,
     BookingWebsitePublishReadiness,
     BookingWebsiteStatus,
+    BookingWebsiteTemplateId,
+    BookingWebsiteTheme,
     BrandAssetUploadResponse,
+    PublicBookingWebsiteResponse,
+    PublicBusinessHour,
+    PublicBusinessProfile,
+    PublicReceptionistInfo,
+    PublicSalonService,
     RESERVED_WEBSITE_SLUGS,
     SlugAvailabilityResponse,
     normalize_website_slug,
@@ -34,8 +46,34 @@ ALLOWED_IMAGE_MIME_TYPES: Dict[str, str] = {
     "image/webp": "webp",
 }
 
-# Stage 1 Foundation: public dynamic route `/s/[slug]` is implemented in Stage 2.
-PUBLIC_WEBSITE_ENGINE_READY = False
+# Stage 2 Dynamic Public Booking Website Engine is active.
+PUBLIC_WEBSITE_ENGINE_READY = True
+
+
+class PublicWebsiteRateLimiter:
+    """In-process sliding-window IP rate limiter for public /s/[slug] API endpoints."""
+
+    def __init__(self, *, max_requests: int = 60, window_seconds: int = 60) -> None:
+        self._max_requests = max_requests
+        self._window_seconds = window_seconds
+        self._hits: Dict[str, Deque[float]] = {}
+
+    def check(self, client_ip: str) -> None:
+        now = time.monotonic()
+        key = (client_ip or "unknown").strip() or "unknown"
+        bucket = self._hits.setdefault(key, deque())
+        cutoff = now - self._window_seconds
+        while bucket and bucket[0] < cutoff:
+            bucket.popleft()
+        if len(bucket) >= self._max_requests:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many requests. Please wait a moment and try again.",
+            )
+        bucket.append(now)
+
+
+_public_rate_limiter = PublicWebsiteRateLimiter(max_requests=60, window_seconds=60)
 
 
 def _verify_image_magic_bytes(content_type: str, data: bytes) -> bool:
@@ -67,10 +105,14 @@ class BookingWebsiteService:
         settings: Settings,
         onboarding_service: OnboardingService,
         website_repo: BookingWebsiteRepositoryProtocol,
+        salon_repo: Any = None,
+        rate_limiter: Optional[PublicWebsiteRateLimiter] = None,
     ) -> None:
         self._settings = settings
         self._onboarding_service = onboarding_service
         self._website_repo = website_repo
+        self._salon_repo = salon_repo
+        self._rate_limiter = rate_limiter or _public_rate_limiter
 
     async def _require_salon_bundle(
         self,
@@ -109,6 +151,10 @@ class BookingWebsiteService:
             missing.append("At least one contact method (phone or email) is required.")
         if not record.slug or len(record.slug.strip()) < 3:
             missing.append("A valid unique website slug is required.")
+        try:
+            BookingWebsiteTemplateId(record.template_id.value)
+        except Exception:
+            missing.append("A valid approved website template must be selected.")
         if not any(not h.is_closed for h in (bundle.hours.schedule or [])):
             missing.append("At least one open operating day is required in business hours.")
 
@@ -121,8 +167,9 @@ class BookingWebsiteService:
             missing_requirements=missing,
         )
 
-    def _to_response(
+    async def _to_response(
         self,
+        actor: AuthenticatedUser,
         record: BookingWebsiteRecord,
         bundle: OnboardingBundleResponse,
     ) -> BookingWebsiteConfigResponse:
@@ -132,19 +179,22 @@ class BookingWebsiteService:
             if PUBLIC_WEBSITE_ENGINE_READY and record.status == BookingWebsiteStatus.PUBLISHED
             else None
         )
+        logo_url = await self._website_repo.resolve_asset_url(actor, record.logo_path)
+        cover_url = await self._website_repo.resolve_asset_url(actor, record.cover_image_path)
         return BookingWebsiteConfigResponse(
             id=record.id,
             organization_id=record.organization_id,
             business_id=record.business_id,
             slug=record.slug,
+            template_id=record.template_id,
             status=record.status,
             published_at=record.published_at,
             headline=record.headline,
             tagline=record.tagline,
             logo_path=record.logo_path,
-            logo_url=self._website_repo.build_public_asset_url(record.logo_path),
+            logo_url=logo_url,
             cover_image_path=record.cover_image_path,
-            cover_image_url=self._website_repo.build_public_asset_url(record.cover_image_path),
+            cover_image_url=cover_url,
             primary_color=record.primary_color,
             secondary_color=record.secondary_color,
             accent_color=record.accent_color,
@@ -177,7 +227,7 @@ class BookingWebsiteService:
             actor, bundle.organization.id, bundle.business_id
         )
         if existing is not None:
-            return self._to_response(existing, bundle)
+            return await self._to_response(actor, existing, bundle)
 
         base_slug = _derive_default_slug(
             bundle.organization.slug,
@@ -194,6 +244,7 @@ class BookingWebsiteService:
             "organization_id": str(bundle.organization.id),
             "business_id": str(bundle.business_id),
             "slug": candidate_slug,
+            "template_id": BookingWebsiteTemplateId.LUXE_STUDIO.value,
             "status": BookingWebsiteStatus.DRAFT.value,
             "headline": f"Book your next visit at {bundle.profile.display_name}",
             "tagline": bundle.profile.description
@@ -217,10 +268,10 @@ class BookingWebsiteService:
             OrganizationRole.ADMIN,
         }:
             ephemeral = BookingWebsiteRecord({"id": str(uuid4()), **default_payload})
-            return self._to_response(ephemeral, bundle)
+            return await self._to_response(actor, ephemeral, bundle)
 
         created = await self._website_repo.create_config(actor, default_payload)
-        return self._to_response(created, bundle)
+        return await self._to_response(actor, created, bundle)
 
     async def check_slug_availability(
         self, *, actor: AuthenticatedUser, organization_id: UUID, raw_slug: str
@@ -274,7 +325,7 @@ class BookingWebsiteService:
             await self.get_or_init_website_config(actor=actor, organization_id=organization_id)
 
         updates = payload.model_dump(exclude_unset=True)
-        for enum_key in ("theme", "font_family", "button_style"):
+        for enum_key in ("template_id", "theme", "font_family", "button_style"):
             if enum_key in updates and updates[enum_key] is not None:
                 val = updates[enum_key]
                 updates[enum_key] = val.value if hasattr(val, "value") else str(val)
@@ -294,12 +345,12 @@ class BookingWebsiteService:
                 actor, bundle.organization.id, bundle.business_id
             )
             assert current is not None
-            return self._to_response(current, bundle)
+            return await self._to_response(actor, current, bundle)
 
         updated = await self._website_repo.update_config(
             actor, bundle.organization.id, bundle.business_id, updates
         )
-        return self._to_response(updated, bundle)
+        return await self._to_response(actor, updated, bundle)
 
     async def upload_brand_asset(
         self,
@@ -402,9 +453,12 @@ class BookingWebsiteService:
             actor,
             bundle.organization.id,
             bundle.business_id,
-            {"status": BookingWebsiteStatus.PUBLISHED.value},
+            {
+                "status": BookingWebsiteStatus.PUBLISHED.value,
+                "published_at": datetime.now(timezone.utc).isoformat(),
+            },
         )
-        return self._to_response(updated, bundle)
+        return await self._to_response(actor, updated, bundle)
 
     async def unpublish_website(
         self, *, actor: AuthenticatedUser, organization_id: UUID
@@ -424,7 +478,246 @@ class BookingWebsiteService:
             bundle.business_id,
             {"status": BookingWebsiteStatus.DRAFT.value, "published_at": None},
         )
-        return self._to_response(updated, bundle)
+        return await self._to_response(actor, updated, bundle)
+
+    def _build_inmemory_public_payload(self, row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Hydrate strictly allowlisted public payload from in-memory repositories (tests/local)."""
+        ob_repo = getattr(self._onboarding_service, "_repo", None) or getattr(
+            self._onboarding_service, "_repository", None
+        )
+        if ob_repo is None:
+            return None
+        org_id = UUID(str(row["organization_id"]))
+        biz_id = UUID(str(row["business_id"]))
+
+        org_repo = getattr(ob_repo, "_org_repo", None)
+        if org_repo is not None:
+            org = getattr(org_repo, "_organizations", {}).get(org_id)
+            org_industry = org.get("industry") if isinstance(org, dict) else getattr(org, "industry", None)
+            if org is None or str(getattr(org_industry, "value", org_industry)) != OrganizationIndustry.SALON.value:
+                return None
+
+        profiles = getattr(ob_repo, "_profiles", {})
+        profile = profiles.get(biz_id)
+        if profile is None:
+            return None
+
+        hours_list: List[Dict[str, Any]] = []
+        if bool(row.get("show_hours", True)):
+            raw_hours_obj = getattr(ob_repo, "_hours", {}).get(biz_id)
+            raw_hours = getattr(raw_hours_obj, "schedule", raw_hours_obj) if raw_hours_obj is not None else []
+            for h in sorted(raw_hours, key=lambda x: x.weekday):
+                hours_list.append(
+                    {
+                        "weekday": h.weekday,
+                        "is_closed": h.is_closed,
+                        "opens_at": h.opens_at,
+                        "closes_at": h.closes_at,
+                        "is_overnight": getattr(h, "is_overnight", False),
+                    }
+                )
+
+        services_list: List[Dict[str, Any]] = []
+        if bool(row.get("show_services", True)) and self._salon_repo is not None:
+            raw_svcs = getattr(self._salon_repo, "_services", {}).values()
+            for s in raw_svcs:
+                if (
+                    getattr(s, "business_id", None) == biz_id
+                    and getattr(s, "organization_id", None) == org_id
+                    and getattr(s, "is_active", False)
+                ):
+                    services_list.append(
+                        {
+                            "id": str(s.id),
+                            "name": s.name,
+                            "category": s.category,
+                            "description": s.description,
+                            "duration_minutes": s.duration_minutes,
+                            "price": float(s.price),
+                            "currency": s.currency,
+                        }
+                    )
+
+        assistant = getattr(ob_repo, "_assistant", {}).get(biz_id)
+        show_ai = bool(row.get("show_ai_receptionist", True)) and bool(
+            assistant and getattr(assistant, "enabled", False)
+        )
+        receptionist = {
+            "enabled": show_ai,
+            "assistant_name": assistant.assistant_name if show_ai and assistant else None,
+            "greeting": assistant.greeting if show_ai and assistant else None,
+        }
+
+        return {
+            **row,
+            "business": {
+                "display_name": profile.display_name,
+                "description": profile.description,
+                "phone": profile.phone,
+                "email": profile.email,
+                "address": profile.address,
+                "city": profile.city,
+                "state": profile.state,
+                "country": profile.country,
+                "timezone": profile.timezone,
+            },
+            "hours": hours_list,
+            "services": services_list,
+            "receptionist": receptionist,
+        }
+
+    async def get_public_website_by_slug(
+        self, *, slug: str, client_ip: str = "unknown"
+    ) -> PublicBookingWebsiteResponse:
+        """Resolve a published salon website by normalized slug with strict public allowlist."""
+        self._rate_limiter.check(client_ip)
+        try:
+            normalized = normalize_website_slug(slug)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Booking website not found.",
+            )
+
+        raw = await self._website_repo.get_published_by_slug(normalized)
+        if raw is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Booking website not found.",
+            )
+
+        if "business" not in raw:
+            hydrated = self._build_inmemory_public_payload(raw)
+            if hydrated is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Booking website not found.",
+                )
+            raw = hydrated
+
+        raw_template = str(raw.get("template_id") or BookingWebsiteTemplateId.LUXE_STUDIO.value)
+        try:
+            template_id = BookingWebsiteTemplateId(raw_template)
+        except ValueError:
+            template_id = BookingWebsiteTemplateId.LUXE_STUDIO
+
+        logo_url = (
+            f"/api/v1/public/websites/{normalized}/assets/logo"
+            if raw.get("logo_path")
+            else None
+        )
+        cover_url = (
+            f"/api/v1/public/websites/{normalized}/assets/cover"
+            if raw.get("cover_image_path")
+            else None
+        )
+
+        biz = raw.get("business") or {}
+        rec = raw.get("receptionist") or {}
+        raw_hours = raw.get("hours") or []
+        raw_services = raw.get("services") or []
+
+        return PublicBookingWebsiteResponse(
+            slug=normalized,
+            template_id=template_id,
+            published_at=raw.get("published_at"),
+            headline=raw.get("headline"),
+            tagline=raw.get("tagline"),
+            logo_url=logo_url,
+            cover_image_url=cover_url,
+            primary_color=str(raw.get("primary_color") or "#7657F6"),
+            secondary_color=str(raw.get("secondary_color") or "#36C6D3"),
+            accent_color=str(raw.get("accent_color") or "#F59E0B"),
+            background_color=str(raw.get("background_color") or "#0B1020"),
+            text_color=str(raw.get("text_color") or "#F5F7FC"),
+            theme=BookingWebsiteTheme(str(raw.get("theme") or "dark")),
+            font_family=BookingWebsiteFontFamily(str(raw.get("font_family") or "inter")),
+            button_style=BookingWebsiteButtonStyle(str(raw.get("button_style") or "rounded")),
+            social_instagram=raw.get("social_instagram"),
+            social_facebook=raw.get("social_facebook"),
+            social_whatsapp=raw.get("social_whatsapp"),
+            show_services=bool(raw.get("show_services", True)),
+            show_hours=bool(raw.get("show_hours", True)),
+            show_ai_receptionist=bool(raw.get("show_ai_receptionist", True)),
+            business=PublicBusinessProfile(
+                display_name=str(biz.get("display_name") or ""),
+                description=biz.get("description"),
+                phone=biz.get("phone"),
+                email=biz.get("email"),
+                address=biz.get("address"),
+                city=biz.get("city"),
+                state=biz.get("state"),
+                country=biz.get("country"),
+                timezone=str(biz.get("timezone") or "Asia/Kolkata"),
+            ),
+            hours=[
+                PublicBusinessHour(
+                    weekday=int(h["weekday"]),
+                    is_closed=bool(h.get("is_closed", False)),
+                    opens_at=h.get("opens_at"),
+                    closes_at=h.get("closes_at"),
+                    is_overnight=bool(h.get("is_overnight", False)),
+                )
+                for h in raw_hours
+            ],
+            services=[
+                PublicSalonService(
+                    id=UUID(str(s["id"])),
+                    name=str(s["name"]),
+                    category=s.get("category"),
+                    description=s.get("description"),
+                    duration_minutes=int(s["duration_minutes"]),
+                    price=float(s["price"]),
+                    currency=str(s.get("currency") or "INR"),
+                )
+                for s in raw_services
+            ],
+            receptionist=PublicReceptionistInfo(
+                enabled=bool(rec.get("enabled", False)),
+                assistant_name=rec.get("assistant_name"),
+                greeting=rec.get("greeting"),
+            ),
+        )
+
+    async def get_public_website_asset(
+        self, *, slug: str, asset_type: str, client_ip: str = "unknown"
+    ) -> Tuple[bytes, str]:
+        """Stream a published website's logo or cover image without making the Storage bucket public."""
+        self._rate_limiter.check(client_ip)
+        if asset_type not in {"logo", "cover"}:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Asset not found.",
+            )
+        try:
+            normalized = normalize_website_slug(slug)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Asset not found.",
+            )
+
+        raw = await self._website_repo.get_published_by_slug(normalized)
+        if raw is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Asset not found.",
+            )
+
+        storage_path = raw.get("logo_path") if asset_type == "logo" else raw.get("cover_image_path")
+        if not storage_path:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Asset not found.",
+            )
+
+        fetched = await self._website_repo.fetch_published_brand_asset(str(storage_path))
+        if fetched is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Asset not found.",
+            )
+        return fetched
 
 
 def get_booking_website_service(

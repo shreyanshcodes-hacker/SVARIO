@@ -21,6 +21,7 @@ const mockConfig = {
   organization_id: "8867eb36-95c3-4d87-b91f-a9e23f21c88b",
   business_id: "1962bebf-c4b2-4a56-a79e-963f8bd7e334",
   slug: "royal-beauty-studio",
+  template_id: "luxe_studio" as const,
   status: "draft" as const,
   published_at: null,
   headline: "Book your visit at Royal Beauty Studio",

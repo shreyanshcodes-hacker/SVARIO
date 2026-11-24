@@ -205,8 +205,8 @@ def test_branding_validation_asset_upload_and_stage1_publish_guard() -> None:
     body = good_save.json()
     assert body["status"] == "draft"
     assert body["public_url_path"] is None
-    assert body["publish_readiness"]["public_engine_ready"] is False
-    assert body["publish_readiness"]["can_publish"] is False
+    assert body["publish_readiness"]["public_engine_ready"] is True
+    assert body["publish_readiness"]["can_publish"] is False  # Missing contact info until profile updated
 
     # Valid PNG upload succeeds; spoofed magic bytes rejected
     png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
@@ -225,7 +225,7 @@ def test_branding_validation_asset_upload_and_stage1_publish_guard() -> None:
     )
     assert bad_upload.status_code == 400
 
-    # Complete required contact info, then verify publish is safely guarded in Stage 1 (409)
+    # Complete required contact info, then verify Stage 2 publish succeeds cleanly
     client.put(
         f"/api/v1/organizations/{salon_id}/onboarding/profile",
         headers={"Authorization": f"Bearer {owner}"},
@@ -239,5 +239,6 @@ def test_branding_validation_asset_upload_and_stage1_publish_guard() -> None:
         f"/api/v1/organizations/{salon_id}/booking-website/publish",
         headers={"Authorization": f"Bearer {owner}"},
     )
-    assert pub_resp.status_code == 409
-    assert "Stage 2" in pub_resp.json()["message"]
+    assert pub_resp.status_code == 200
+    assert pub_resp.json()["status"] == "published"
+    assert pub_resp.json()["public_url_path"] == f"/s/{pub_resp.json()['slug']}"
