@@ -601,14 +601,16 @@ class BookingWebsiteService:
         except ValueError:
             template_id = BookingWebsiteTemplateId.LUXE_STUDIO
 
+        has_logo = bool(raw.get("has_logo")) or bool(raw.get("logo_path"))
+        has_cover = bool(raw.get("has_cover")) or bool(raw.get("cover_image_path"))
         logo_url = (
             f"/api/v1/public/websites/{normalized}/assets/logo"
-            if raw.get("logo_path")
+            if has_logo
             else None
         )
         cover_url = (
             f"/api/v1/public/websites/{normalized}/assets/cover"
-            if raw.get("cover_image_path")
+            if has_cover
             else None
         )
 
@@ -682,7 +684,7 @@ class BookingWebsiteService:
     async def get_public_website_asset(
         self, *, slug: str, asset_type: str, client_ip: str = "unknown"
     ) -> Tuple[bytes, str]:
-        """Stream a published website's logo or cover image without making the Storage bucket public."""
+        """Stream a published website's logo or cover image via trusted server-side resolution."""
         self._rate_limiter.check(client_ip)
         if asset_type not in {"logo", "cover"}:
             raise HTTPException(
@@ -697,21 +699,9 @@ class BookingWebsiteService:
                 detail="Asset not found.",
             )
 
-        raw = await self._website_repo.get_published_by_slug(normalized)
-        if raw is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Asset not found.",
-            )
-
-        storage_path = raw.get("logo_path") if asset_type == "logo" else raw.get("cover_image_path")
-        if not storage_path:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Asset not found.",
-            )
-
-        fetched = await self._website_repo.fetch_published_brand_asset(str(storage_path))
+        fetched = await self._website_repo.fetch_published_brand_asset_by_slug(
+            normalized, asset_type
+        )
         if fetched is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

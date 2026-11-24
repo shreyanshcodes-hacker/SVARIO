@@ -2,12 +2,20 @@
 
 from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request, Response, status
+from app.agents.schemas import VoiceToolExecutionResponse
 from app.core.auth import AuthenticatedUser, get_current_user
+from app.modules.websites.public_voice import (
+    PublicWebsiteVoiceBridgeService,
+    get_public_website_voice_bridge_service,
+)
 from app.modules.websites.schemas import (
     BookingWebsiteConfigResponse,
     BookingWebsiteDraftUpdateRequest,
     BrandAssetUploadResponse,
     PublicBookingWebsiteResponse,
+    PublicWebsiteVoiceSessionRequest,
+    PublicWebsiteVoiceSessionResponse,
+    PublicWebsiteVoiceToolRequest,
     SlugAvailabilityResponse,
 )
 from app.modules.websites.service import (
@@ -178,6 +186,44 @@ async def get_public_booking_website_asset(
         media_type=content_type,
         headers={
             "X-Content-Type-Options": "nosniff",
-            "Cache-Control": "public, max-age=300",
+            "Cache-Control": "no-store",
         },
+    )
+
+
+@public_router.post(
+    "/{slug}/voice/sessions",
+    response_model=PublicWebsiteVoiceSessionResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a tenant-scoped public AI Receptionist voice session for a published salon website",
+)
+async def create_public_website_voice_session(
+    slug: str,
+    payload: PublicWebsiteVoiceSessionRequest,
+    request: Request,
+    bridge: PublicWebsiteVoiceBridgeService = Depends(get_public_website_voice_bridge_service),
+) -> PublicWebsiteVoiceSessionResponse:
+    return await bridge.create_public_voice_session(
+        slug=slug,
+        client_ip=_extract_client_ip(request),
+        payload=payload,
+    )
+
+
+@public_router.post(
+    "/{slug}/voice/tools/execute",
+    response_model=VoiceToolExecutionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Execute a salon AI Receptionist tool call for an active public website voice session",
+)
+async def execute_public_website_voice_tool(
+    slug: str,
+    payload: PublicWebsiteVoiceToolRequest,
+    request: Request,
+    bridge: PublicWebsiteVoiceBridgeService = Depends(get_public_website_voice_bridge_service),
+) -> VoiceToolExecutionResponse:
+    return await bridge.execute_public_voice_tool(
+        slug=slug,
+        client_ip=_extract_client_ip(request),
+        payload=payload,
     )

@@ -1,26 +1,32 @@
 "use client";
 
 import React, { useState } from "react";
+import type { WebRtcEnvironmentAdapters } from "@/lib/voice/webrtcClient";
 import type { PublicBookingWebsiteData, PublicSalonServiceItem } from "@/types/website";
+import { PublicAiReceptionist } from "./receptionist/PublicAiReceptionist";
 import { resolveTemplateEntry } from "./template-registry";
 import { formatServicePrice, safeExternalHref } from "./template-utils";
 
 export interface PublicBookingWebsiteRendererProps {
   data: PublicBookingWebsiteData;
   isPreview?: boolean;
+  voiceAdapters?: WebRtcEnvironmentAdapters;
 }
 
 /**
  * Renders the approved salon website template and connects booking CTAs
- * to a clean Stage 2 booking entry sheet without duplicating the booking or voice engine.
+ * and the template-aware Stage 3 Public AI Receptionist without modifying
+ * any of the 8 locked template components or the locked voice core.
  */
 export function PublicBookingWebsiteRenderer({
   data,
   isPreview = false,
+  voiceAdapters,
 }: PublicBookingWebsiteRendererProps): React.JSX.Element {
   const entry = resolveTemplateEntry(data.template_id);
   const TemplateComponent = entry.Component;
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
+  const [receptionistOpen, setReceptionistOpen] = useState(false);
   const [selectedService, setSelectedService] = useState<PublicSalonServiceItem | null>(null);
 
   const handleBookClick = (service?: PublicSalonServiceItem) => {
@@ -33,6 +39,16 @@ export function PublicBookingWebsiteRenderer({
   return (
     <div className="relative min-h-full">
       <TemplateComponent data={data} onBookClick={handleBookClick} isPreview={isPreview} />
+
+      <PublicAiReceptionist
+        data={data}
+        isPreview={isPreview}
+        isOpen={receptionistOpen}
+        onOpen={() => setReceptionistOpen(true)}
+        onClose={() => setReceptionistOpen(false)}
+        selectedService={selectedService}
+        adapters={voiceAdapters}
+      />
 
       {bookingModalOpen && (
         <div
@@ -80,7 +96,7 @@ export function PublicBookingWebsiteRenderer({
               </p>
             )}
 
-            {data.receptionist.enabled && (
+            {data.show_ai_receptionist && data.receptionist.enabled && (
               <div className="mt-4 rounded-xl border border-[#7657F6]/40 bg-[#7657F6]/10 p-4 text-xs">
                 <p className="font-semibold text-[#C4B5FD]">
                   AI Voice Receptionist · {data.receptionist.assistant_name || "Svario"}
@@ -89,9 +105,17 @@ export function PublicBookingWebsiteRenderer({
                   {data.receptionist.greeting ||
                     "Our AI receptionist checks live salon availability and confirms your booking."}
                 </p>
-                <p className="mt-2 text-[11px] text-slate-400">
-                  Embedded browser voice booking activates in Stage 3 using your salon&apos;s existing Svario Realtime engine.
-                </p>
+                <button
+                  type="button"
+                  data-testid="booking-modal-talk-to-ai-button"
+                  onClick={() => {
+                    setBookingModalOpen(false);
+                    setReceptionistOpen(true);
+                  }}
+                  className="mt-3 w-full rounded-xl bg-[#7657F6] px-4 py-2.5 text-center text-xs font-semibold text-white transition hover:bg-[#6546e6]"
+                >
+                  Talk to AI Receptionist
+                </button>
               </div>
             )}
 

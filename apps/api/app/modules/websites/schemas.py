@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 import re
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -355,3 +355,49 @@ class PublicBookingWebsiteResponse(BaseModel):
     hours: List[PublicBusinessHour] = Field(default_factory=list)
     services: List[PublicSalonService] = Field(default_factory=list)
     receptionist: PublicReceptionistInfo = Field(default_factory=PublicReceptionistInfo)
+
+
+class PublicWebsiteVoiceSessionRequest(BaseModel):
+    """Strict request schema for POST /api/v1/public/websites/{slug}/voice/sessions.
+
+    Never accepts organization_id, business_id, system prompts, or raw OpenAI overrides.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    voice_override: Optional[str] = Field(
+        default=None,
+        max_length=32,
+        description="Optional safe OpenAI Realtime voice preset.",
+    )
+
+
+class PublicWebsiteVoiceSessionResponse(BaseModel):
+    """Sanitized public website voice session response (ZERO tenant UUIDs or permanent keys)."""
+
+    session_id: str
+    slug: str
+    visitor_session_token: str
+    model: str
+    voice: str
+    webrtc_url: str
+    webrtc_calls_url: str
+    data_channel_label: str = "oai-events"
+    client_secret: Dict[str, Any]
+    capabilities: Dict[str, Any]
+    assistant_context: Dict[str, Any]
+
+
+class PublicWebsiteVoiceToolRequest(BaseModel):
+    """Strict tool execution request for POST /api/v1/public/websites/{slug}/voice/tools/execute.
+
+    Tenant ownership is resolved strictly server-side from the slug and opaque visitor_session_token.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(..., min_length=4, max_length=128)
+    call_id: str = Field(..., min_length=2, max_length=128)
+    tool_name: str = Field(..., min_length=2, max_length=80)
+    arguments: Dict[str, Any] = Field(default_factory=dict)
+    visitor_session_token: str = Field(..., min_length=16, max_length=256)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from typing import Any, Dict, Optional, Protocol, Tuple
 from uuid import UUID, uuid4
 import httpx
@@ -18,6 +19,34 @@ from app.modules.websites.schemas import (
 )
 
 BRAND_ASSETS_BUCKET = "salon-brand-assets"
+
+SAFE_BRAND_ASSET_PATH_REGEX = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/"
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/"
+    r"(logo|cover)-[0-9a-f]{12}\.(png|jpg|webp)$"
+)
+
+
+def is_valid_brand_asset_path(
+    storage_path: Optional[str],
+    *,
+    asset_type: Optional[str] = None,
+    organization_id: Optional[UUID] = None,
+    business_id: Optional[UUID] = None,
+) -> bool:
+    """Defense-in-depth validation for tenant-scoped Storage asset paths."""
+    if not storage_path or ".." in storage_path or storage_path.startswith("/"):
+        return False
+    match = SAFE_BRAND_ASSET_PATH_REGEX.match(storage_path)
+    if not match:
+        return False
+    if asset_type is not None and match.group(1) != asset_type:
+        return False
+    if organization_id is not None and business_id is not None:
+        expected_prefix = f"{str(organization_id).lower()}/{str(business_id).lower()}/"
+        if not storage_path.startswith(expected_prefix):
+            return False
+    return True
 
 
 class BookingWebsiteRecord:
@@ -108,8 +137,8 @@ class BookingWebsiteRepositoryProtocol(Protocol):
 
     async def get_published_by_slug(self, slug: str) -> Optional[Dict[str, Any]]: ...
 
-    async def fetch_published_brand_asset(
-        self, storage_path: str
+    async def fetch_published_brand_asset_by_slug(
+        self, slug: str, asset_type: str
     ) -> Optional[Tuple[bytes, str]]: ...
 
     def build_public_asset_url(self, storage_path: Optional[str]) -> Optional[str]: ...
@@ -220,17 +249,25 @@ class InMemoryBookingWebsiteRepository:
                 return dict(row)
         return None
 
-    async def fetch_published_brand_asset(
-        self, storage_path: str
+    async def fetch_published_brand_asset_by_slug(
+        self, slug: str, asset_type: str
     ) -> Optional[Tuple[bytes, str]]:
-        # Only serve assets that currently belong to a PUBLISHED website record
-        is_published = any(
-            str(row.get("status", "")) == BookingWebsiteStatus.PUBLISHED.value
-            and (row.get("logo_path") == storage_path or row.get("cover_image_path") == storage_path)
-            for row in self._records_by_business.values()
-        )
-        if not is_published:
+        if asset_type not in {"logo", "cover"}:
             return None
+        row = await self.get_published_by_slug(slug)
+        if row is None:
+            return None
+        storage_path = row.get("logo_path") if asset_type == "logo" else row.get("cover_image_path")
+        org_id = UUID(str(row["organization_id"]))
+        biz_id = UUID(str(row["business_id"]))
+        if not is_valid_brand_asset_path(
+            storage_path,
+            asset_type=asset_type,
+            organization_id=org_id,
+            business_id=biz_id,
+        ):
+            return None
+        assert isinstance(storage_path, str)
         data = self._assets.get(storage_path)
         if data is None:
             return None
@@ -475,19 +512,41 @@ class SupabaseRestBookingWebsiteRepository:
             return None
         return payload
 
-    async def fetch_published_brand_asset(
-        self, storage_path: str
+    async def fetch_published_brand_asset_by_slug(
+        self, slug: str, asset_type: str
     ) -> Optional[Tuple[bytes, str]]:
-        """Stream a published website's brand asset from the private salon-brand-assets bucket."""
-        if not storage_path:
+        """Resolve and stream a published brand asset using ONLY backend service-role credentials."""
+        if asset_type not in {"logo", "cover"}:
             return None
-        bearer = self._service_role_key or self._anon_key
+        if not self._service_role_key:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Private brand asset proxy requires SUPABASE_SERVICE_ROLE_KEY on the backend.",
+            )
+
         async with httpx.AsyncClient(timeout=15.0) as client:
+            path_resp = await client.post(
+                f"{self._base_url}/rest/v1/rpc/get_published_brand_asset_path",
+                headers={
+                    "apikey": self._service_role_key,
+                    "Authorization": f"Bearer {self._service_role_key}",
+                    "Content-Type": "application/json",
+                },
+                json={"p_slug": slug.strip().lower(), "p_asset_type": asset_type},
+            )
+            if path_resp.status_code >= 400:
+                return None
+            storage_path = path_resp.json()
+            if not isinstance(storage_path, str) or not is_valid_brand_asset_path(
+                storage_path, asset_type=asset_type
+            ):
+                return None
+
             resp = await client.get(
                 f"{self._base_url}/storage/v1/object/{BRAND_ASSETS_BUCKET}/{storage_path}",
                 headers={
-                    "apikey": self._anon_key,
-                    "Authorization": f"Bearer {bearer}",
+                    "apikey": self._service_role_key,
+                    "Authorization": f"Bearer {self._service_role_key}",
                 },
             )
         if resp.status_code >= 400:

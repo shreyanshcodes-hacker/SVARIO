@@ -1226,3 +1226,74 @@ export async function fetchPublicBookingWebsite(
     cover_image_url: resolveUrl(data.cover_image_url),
   };
 }
+
+export interface PublicWebsiteVoiceSessionData {
+  session_id: string;
+  slug: string;
+  visitor_session_token: string;
+  model: string;
+  voice: string;
+  webrtc_url: string;
+  webrtc_calls_url: string;
+  data_channel_label: string;
+  client_secret: {
+    value: string;
+    expires_at: string;
+    ttl_seconds: number;
+  };
+  capabilities: {
+    modalities: string[];
+    barge_in_enabled: boolean;
+    raw_audio_storage_enabled: boolean;
+    transcript_storage_enabled: boolean;
+    appointment_booking_enabled: boolean;
+    industry_workflows_enabled: boolean;
+  };
+  assistant_context: VoiceSessionCreateResponseData["assistant_context"];
+}
+
+export async function createPublicWebsiteVoiceSessionApi(
+  slug: string,
+  voiceOverride?: string
+): Promise<PublicWebsiteVoiceSessionData> {
+  const res = await fetch(
+    `${getApiBaseUrl()}/api/v1/public/websites/${encodeURIComponent(slug)}/voice/sessions`,
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(voiceOverride ? { voice_override: voiceOverride } : {}),
+      cache: "no-store",
+    }
+  );
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as PublicWebsiteVoiceSessionData;
+}
+
+export async function executePublicWebsiteVoiceToolApi(
+  slug: string,
+  payload: {
+    session_id: string;
+    call_id: string;
+    tool_name: string;
+    arguments: Record<string, unknown>;
+    visitor_session_token: string;
+  }
+): Promise<VoiceToolExecutionResponseData> {
+  const res = await fetch(
+    `${getApiBaseUrl()}/api/v1/public/websites/${encodeURIComponent(slug)}/voice/tools/execute`,
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      cache: "no-store",
+    }
+  );
+  if (!res.ok) throw new Error(await parseApiError(res));
+  return (await res.json()) as VoiceToolExecutionResponseData;
+}
