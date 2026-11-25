@@ -32,7 +32,7 @@ import type {
 export function getApiBaseUrl(): string {
   const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
   if (typeof window !== "undefined") {
-    // If configured is an explicit non-local URL (production Render/Vercel)
+    // If configured is an explicit non-local URL (separate API domain)
     if (
       configured &&
       configured.length > 0 &&
@@ -42,13 +42,28 @@ export function getApiBaseUrl(): string {
       return configured.replace(/\/+$/, "");
     }
 
+    const currentHost = window.location.hostname || "localhost";
+    const isLocalHost =
+      currentHost === "localhost" || currentHost === "127.0.0.1";
+
+    // On Vercel / deployed domains without an external API URL, use same-origin
+    // relative paths so requests route through vercel.json rewrites (/api/*, /health*).
+    if (!isLocalHost) {
+      return "";
+    }
+
     const isPort3001 = window.location.port === "3001";
     const apiPort = isPort3001 ? "8001" : "8000";
-    const currentHost = window.location.hostname || "localhost";
     const currentProtocol = window.location.protocol === "https:" ? "https:" : "http:";
 
-    // Match browser's active host (localhost, 127.0.0.1, or LAN IP) to prevent CORS/loopback resolution issues
+    // Match browser's active local host (localhost or 127.0.0.1) in standalone local dev
     return `${currentProtocol}//${currentHost}:${apiPort}`;
+  }
+
+  // Server-side (SSR / Server Components): prefer Vercel service binding `API_URL`
+  const boundApiUrl = process.env.API_URL?.trim();
+  if (boundApiUrl && boundApiUrl.length > 0) {
+    return boundApiUrl.replace(/\/+$/, "");
   }
 
   if (configured && configured.length > 0) {
@@ -1215,10 +1230,16 @@ export async function fetchPublicBookingWebsite(
     throw new Error(await parseApiError(res));
   }
   const data = (await res.json()) as PublicBookingWebsiteData;
+  const publicBase =
+    typeof window !== "undefined"
+      ? apiBase
+      : process.env.API_URL?.trim()
+        ? ""
+        : apiBase;
   const resolveUrl = (url: string | null): string | null => {
     if (!url) return null;
     if (url.startsWith("http://") || url.startsWith("https://")) return url;
-    return `${apiBase}${url}`;
+    return `${publicBase}${url}`;
   };
   return {
     ...data,
