@@ -3,8 +3,7 @@
 import React, { useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { SvarioLogoPlaceholder } from "@/components/SvarioLogoPlaceholder";
-import { StageIndicatorBadge } from "@/components/StageIndicatorBadge";
+import { SvarioBrandLogo } from "@/components/SvarioBrandLogo";
 import { OrganizationSwitcher } from "@/components/organizations/OrganizationSwitcher";
 import { BookingWebsiteWorkspace } from "@/components/website/BookingWebsiteWorkspace";
 import { useAuthOrganization } from "@/context/AuthOrganizationContext";
@@ -46,9 +45,8 @@ export default function BookingWebsiteDashboardPage(): React.JSX.Element {
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-4">
             <Link href="/">
-              <SvarioLogoPlaceholder />
+              <SvarioBrandLogo />
             </Link>
-            <StageIndicatorBadge />
           </div>
 
           <div className="flex flex-wrap items-center gap-3">

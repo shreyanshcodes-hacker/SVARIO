@@ -20,6 +20,10 @@ case "${MODE}" in
     cd /app/apps/web
     exec npm run start -- --hostname 0.0.0.0 --port "${WEB_PORT}"
     ;;
+  worker)
+    cd /app/apps/api
+    exec /opt/venv/bin/python -m app.workers.sms_reminder_worker
+    ;;
   dev)
     cd /app/apps/api
     /opt/venv/bin/uvicorn app.main:app --reload --host "${API_HOST}" --port "${API_PORT}" &

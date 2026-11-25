@@ -203,14 +203,16 @@ export function NoirSalonTemplate({ data, onBookClick }: TemplateComponentProps)
         </div>
       </section>
 
-      <footer className="border-t border-white/15 bg-[#0B0C0D] px-6 py-6">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 font-mono text-[11px] uppercase text-zinc-500">
+      <footer className="border-t border-white/15 bg-[#0B0C0D] px-6 py-6 text-center">
+        <div className="mx-auto flex max-w-6xl flex-col items-center justify-center gap-3 font-mono text-[11px] uppercase text-zinc-500">
           <span>© {data.business.display_name}</span>
-          <div className="flex gap-5">
-            {igHref && <a href={igHref} target="_blank" rel="noreferrer" className="hover:text-white">IG</a>}
-            {fbHref && <a href={fbHref} target="_blank" rel="noreferrer" className="hover:text-white">FB</a>}
-            {waHref && <a href={waHref} target="_blank" rel="noreferrer" className="hover:text-white">WA</a>}
-          </div>
+          {(igHref || fbHref || waHref) && (
+            <div className="flex flex-wrap justify-center gap-5">
+              {igHref && <a href={igHref} target="_blank" rel="noreferrer" className="hover:text-white">IG</a>}
+              {fbHref && <a href={fbHref} target="_blank" rel="noreferrer" className="hover:text-white">FB</a>}
+              {waHref && <a href={waHref} target="_blank" rel="noreferrer" className="hover:text-white">WA</a>}
+            </div>
+          )}
         </div>
       </footer>
     </div>

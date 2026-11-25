@@ -120,6 +120,118 @@ class Settings(BaseSettings):
         validation_alias="VOICE_PUBLIC_TOKEN_TTL_SECONDS",
     )
 
+    # --- Stage 12B: SMS Reminder Engine Foundation (Noop-only, disabled by default) ---
+    sms_reminders_enabled: bool = Field(
+        default=False,
+        validation_alias="SMS_REMINDERS_ENABLED",
+    )
+    sms_provider: str = Field(
+        default="noop",
+        validation_alias="SMS_PROVIDER",
+    )
+    sms_worker_poll_interval_seconds: int = Field(
+        default=30,
+        ge=5,
+        le=300,
+        validation_alias="SMS_WORKER_POLL_INTERVAL_SECONDS",
+    )
+    sms_worker_batch_size: int = Field(
+        default=25,
+        ge=1,
+        le=100,
+        validation_alias="SMS_WORKER_BATCH_SIZE",
+    )
+    sms_worker_lease_timeout_seconds: int = Field(
+        default=300,
+        ge=30,
+        le=3600,
+        validation_alias="SMS_WORKER_LEASE_TIMEOUT_SECONDS",
+    )
+    sms_reminder_lead_minutes: int = Field(
+        default=30,
+        ge=5,
+        le=1440,
+        validation_alias="SMS_REMINDER_LEAD_MINUTES",
+    )
+    sms_default_country_code: Optional[str] = Field(
+        default=None,
+        validation_alias="SMS_DEFAULT_COUNTRY_CODE",
+    )
+
+    # --- Stage 12C.1: MSG91 Provider Configuration (inactive while SMS_REMINDERS_ENABLED=false) ---
+    msg91_api_key: Optional[str] = Field(
+        default=None,
+        validation_alias="MSG91_API_KEY",
+        repr=False,
+    )
+    msg91_api_base_url: str = Field(
+        default="https://control.msg91.com/api/v5/flow",
+        validation_alias="MSG91_API_BASE_URL",
+    )
+    msg91_sender_id: Optional[str] = Field(
+        default=None,
+        validation_alias="MSG91_SENDER_ID",
+    )
+    msg91_dlt_entity_id: Optional[str] = Field(
+        default=None,
+        validation_alias="MSG91_DLT_ENTITY_ID",
+    )
+    msg91_template_id_customer_30m: Optional[str] = Field(
+        default=None,
+        validation_alias="MSG91_TEMPLATE_ID_CUSTOMER_30M",
+    )
+    msg91_template_id_owner_30m: Optional[str] = Field(
+        default=None,
+        validation_alias="MSG91_TEMPLATE_ID_OWNER_30M",
+    )
+    msg91_template_id_staff_30m: Optional[str] = Field(
+        default=None,
+        validation_alias="MSG91_TEMPLATE_ID_STAFF_30M",
+    )
+    msg91_connect_timeout_seconds: float = Field(
+        default=5.0,
+        ge=1.0,
+        le=30.0,
+        validation_alias="MSG91_CONNECT_TIMEOUT_SECONDS",
+    )
+    msg91_read_timeout_seconds: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=60.0,
+        validation_alias="MSG91_READ_TIMEOUT_SECONDS",
+    )
+    msg91_write_timeout_seconds: float = Field(
+        default=5.0,
+        ge=1.0,
+        le=30.0,
+        validation_alias="MSG91_WRITE_TIMEOUT_SECONDS",
+    )
+
+    # --- Stage 12C.2: MSG91 DLR Webhook & SMS Logs Reconciliation (disabled by default) ---
+    msg91_webhook_secret: Optional[str] = Field(
+        default=None,
+        validation_alias="MSG91_WEBHOOK_SECRET",
+        repr=False,
+    )
+    msg91_webhook_timezone: str = Field(
+        default="Asia/Kolkata",
+        validation_alias="MSG91_WEBHOOK_TIMEZONE",
+    )
+    msg91_webhook_max_body_bytes: int = Field(
+        default=65536,
+        ge=1024,
+        le=524288,
+        validation_alias="MSG91_WEBHOOK_MAX_BODY_BYTES",
+    )
+    msg91_logs_reconciliation_enabled: bool = Field(
+        default=False,
+        validation_alias="MSG91_LOGS_RECONCILIATION_ENABLED",
+    )
+    msg91_logs_api_url: str = Field(
+        default="https://control.msg91.com/api/v5/report/logs/p/sms",
+        validation_alias="MSG91_LOGS_API_URL",
+    )
+
     @field_validator("svario_stage")
     @classmethod
     def validate_stage(cls, value: int) -> int:

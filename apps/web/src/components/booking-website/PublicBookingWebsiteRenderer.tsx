@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import type { WebRtcEnvironmentAdapters } from "@/lib/voice/webrtcClient";
 import type { PublicBookingWebsiteData, PublicSalonServiceItem } from "@/types/website";
 import { PublicAiReceptionist } from "./receptionist/PublicAiReceptionist";
+import { resolveReceptionistTemplateTheme } from "./receptionist/template-theme-adapter";
 import { resolveTemplateEntry } from "./template-registry";
 import { formatServicePrice, safeExternalHref } from "./template-utils";
 
@@ -25,6 +26,7 @@ export function PublicBookingWebsiteRenderer({
 }: PublicBookingWebsiteRendererProps): React.JSX.Element {
   const entry = resolveTemplateEntry(data.template_id);
   const TemplateComponent = entry.Component;
+  const theme = resolveReceptionistTemplateTheme(data);
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
   const [receptionistOpen, setReceptionistOpen] = useState(false);
   const [selectedService, setSelectedService] = useState<PublicSalonServiceItem | null>(null);
@@ -39,6 +41,40 @@ export function PublicBookingWebsiteRenderer({
   return (
     <div className="relative min-h-full">
       <TemplateComponent data={data} onBookClick={handleBookClick} isPreview={isPreview} />
+
+      {/* Centralized, theme-adapted Svario attribution footer */}
+      <div
+        role="contentinfo"
+        aria-label="Svario Platform Attribution"
+        data-testid="public-website-svario-footer"
+        style={{
+          backgroundColor:
+            theme.templateId === "urban_chic" ? "#FEF08A" : theme.surfaceBg,
+          borderColor:
+            theme.templateId === "urban_chic" ? "transparent" : theme.borderColor,
+          color:
+            theme.templateId === "urban_chic" ? "#12131F" : theme.textMuted,
+          fontFamily: theme.fontFamily,
+        }}
+        className={`w-full px-6 text-center ${
+          theme.templateId === "urban_chic" ? "pt-1 pb-6" : "border-t py-5"
+        }`}
+      >
+        <div className="mx-auto flex max-w-4xl flex-col items-center justify-center gap-1 break-words">
+          <p
+            style={{
+              color:
+                theme.templateId === "urban_chic" ? "#12131F" : theme.textPrimary,
+            }}
+            className="text-xs font-medium tracking-wide"
+          >
+            Powered by Svario
+          </p>
+          <p className="text-[11px] font-medium opacity-85">
+            All rights reserved by Svario.
+          </p>
+        </div>
+      </div>
 
       <PublicAiReceptionist
         data={data}

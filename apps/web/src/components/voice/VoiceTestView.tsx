@@ -2,8 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { SvarioLogoPlaceholder } from "@/components/SvarioLogoPlaceholder";
-import { StageIndicatorBadge } from "@/components/StageIndicatorBadge";
+import { SvarioBrandLogo } from "@/components/SvarioBrandLogo";
 import { VoiceSessionPanel } from "@/components/voice/VoiceSessionPanel";
 import { useAuthOrganization } from "@/context/AuthOrganizationContext";
 import type { WebRtcEnvironmentAdapters } from "@/lib/voice/webrtcClient";
@@ -74,9 +73,8 @@ export function VoiceTestView({
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-4">
           <div className="flex flex-wrap items-center gap-4">
             <Link href="/">
-              <SvarioLogoPlaceholder />
+              <SvarioBrandLogo />
             </Link>
-            <StageIndicatorBadge />
           </div>
 
           <nav className="flex flex-wrap items-center gap-3">
@@ -99,15 +97,14 @@ export function VoiceTestView({
       <main className="mx-auto max-w-6xl space-y-6 px-6 py-10">
         <div className="rounded-2xl border border-[#7657F6]/30 bg-gradient-to-r from-[#171D33] via-[#171D33]/90 to-[#0B1020] p-6">
           <span className="font-mono text-xs uppercase tracking-widest text-[#36C6D3]">
-            DEVELOPMENT & OPERATOR VOICE TEST LAB
+            AI RECEPTIONIST PREVIEW
           </span>
           <h1 className="mt-1 text-2xl font-bold text-[#F5F7FC]">
-            Svario Browser Voice Infrastructure (Stage 3)
+            Svario Voice Receptionist Test Lab
           </h1>
           <p className="mt-1 max-w-3xl text-sm text-[#A7B0C4]">
-            Test real-time bidirectional browser audio with your organization&apos;s
-            configured AI voice receptionist over OpenAI Realtime WebRTC. All
-            sessions use short-lived ephemeral credentials minted by the backend.
+            Preview real-time voice conversations with your salon&apos;s
+            configured AI receptionist directly in your browser.
           </p>
         </div>
 

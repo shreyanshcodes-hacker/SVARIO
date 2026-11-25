@@ -42,6 +42,7 @@ export type OnboardingStepIdType =
 export interface IndustryCardItem {
   id: IndustryId;
   name: string;
+  availability: "available" | "coming_soon";
   categoryLabel: string;
   headline: string;
   description: string;

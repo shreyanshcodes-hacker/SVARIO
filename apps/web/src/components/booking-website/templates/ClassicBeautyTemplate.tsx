@@ -247,17 +247,19 @@ export function ClassicBeautyTemplate({ data, onBookClick }: TemplateComponentPr
         </aside>
       </section>
 
-      <footer className="border-t border-slate-200 bg-[#1E293B] px-6 py-8 text-xs text-slate-300">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4">
+      <footer className="border-t border-slate-200 bg-[#1E293B] px-6 py-8 text-center text-xs text-slate-300">
+        <div className="mx-auto flex max-w-6xl flex-col items-center justify-center gap-3">
           <div>
             <p className="font-semibold text-white">{data.business.display_name}</p>
             {fullAddress && <p className="mt-1 text-slate-400">{fullAddress}</p>}
           </div>
-          <div className="flex gap-4">
-            {igHref && <a href={igHref} target="_blank" rel="noreferrer" className="hover:text-white">Instagram</a>}
-            {fbHref && <a href={fbHref} target="_blank" rel="noreferrer" className="hover:text-white">Facebook</a>}
-            {waHref && <a href={waHref} target="_blank" rel="noreferrer" className="hover:text-white">WhatsApp</a>}
-          </div>
+          {(igHref || fbHref || waHref) && (
+            <div className="flex flex-wrap justify-center gap-4">
+              {igHref && <a href={igHref} target="_blank" rel="noreferrer" className="hover:text-white">Instagram</a>}
+              {fbHref && <a href={fbHref} target="_blank" rel="noreferrer" className="hover:text-white">Facebook</a>}
+              {waHref && <a href={waHref} target="_blank" rel="noreferrer" className="hover:text-white">WhatsApp</a>}
+            </div>
+          )}
         </div>
       </footer>
     </div>

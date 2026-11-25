@@ -213,7 +213,7 @@ describe("Stage 3 Shared Browser Voice Infrastructure", () => {
     );
 
     expect(
-      screen.getByText(/Svario Browser Voice Infrastructure \(Stage 3\)/i)
+      screen.getByText(/Svario Voice Receptionist Test Lab/i)
     ).toBeDefined();
     expect(
       screen.getByTestId("voice-orb-waveform").getAttribute("data-voice-state")

@@ -208,7 +208,7 @@ describe("Stage 5: SalonDashboardView Component", () => {
     );
 
     // Verify header and metrics
-    expect(screen.getByText("Stage 5 Salon Workflow Module")).toBeTruthy();
+    expect(screen.getByText("Salon Operations")).toBeTruthy();
     expect(screen.getByText("Salon Operations & Appointment Desk")).toBeTruthy();
 
     await waitFor(() => {

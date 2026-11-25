@@ -14,10 +14,13 @@ from __future__ import annotations
 import hashlib
 import logging
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import Depends, HTTPException, status
+
+if TYPE_CHECKING:
+    from app.modules.notifications.service import AppointmentReminderService
 from app.core.auth import AuthenticatedUser
 from app.core.config import Settings, get_settings
 from app.core.internal_voice import (
@@ -86,10 +89,74 @@ class SalonWorkflowService:
         settings: Settings,
         salon_repo: SalonRepositoryProtocol,
         onboarding_repo: OnboardingRepositoryProtocol,
+        reminder_service: Optional["AppointmentReminderService"] = None,
     ) -> None:
         self._settings = settings
         self._salon_repo = salon_repo
         self._onboarding_repo = onboarding_repo
+        self._reminder_service = reminder_service
+
+    async def _sync_reminders_created(
+        self,
+        appointment: SalonAppointmentResponse,
+        staff: Optional[SalonStaffResponse],
+    ) -> None:
+        if self._reminder_service is None or not self._settings.sms_reminders_enabled:
+            return
+        try:
+            await self._reminder_service.sync_for_created_appointment(
+                appointment=appointment,
+                staff=staff,
+            )
+        except Exception as exc:
+            logger.warning(
+                "sms_reminder_sync_created_failed appointment_id=%s error_type=%s",
+                appointment.id,
+                type(exc).__name__,
+            )
+
+    async def _sync_reminders_rescheduled(
+        self,
+        appointment: SalonAppointmentResponse,
+        staff: Optional[SalonStaffResponse],
+    ) -> None:
+        if self._reminder_service is None or not self._settings.sms_reminders_enabled:
+            return
+        try:
+            await self._reminder_service.sync_for_rescheduled_appointment(
+                appointment=appointment,
+                staff=staff,
+            )
+        except Exception as exc:
+            logger.warning(
+                "sms_reminder_sync_rescheduled_failed appointment_id=%s error_type=%s",
+                appointment.id,
+                type(exc).__name__,
+            )
+
+    async def _sync_reminders_invalidated(
+        self,
+        organization_id: UUID,
+        business_id: UUID,
+        appointment_id: UUID,
+        *,
+        reason: str,
+    ) -> None:
+        if self._reminder_service is None or not self._settings.sms_reminders_enabled:
+            return
+        try:
+            await self._reminder_service.cancel_for_appointment(
+                organization_id=organization_id,
+                business_id=business_id,
+                appointment_id=appointment_id,
+                reason=reason,
+            )
+        except Exception as exc:
+            logger.warning(
+                "sms_reminder_sync_cancel_failed appointment_id=%s error_type=%s",
+                appointment_id,
+                type(exc).__name__,
+            )
 
     async def _verify_org_access(
         self,
@@ -754,6 +821,7 @@ class SalonWorkflowService:
         )
 
         created = await self._salon_repo.create_appointment(actor, organization_id, business_id, appt_record)
+        await self._sync_reminders_created(created, staff)
         return created
 
     async def get_appointment(
@@ -874,7 +942,9 @@ class SalonWorkflowService:
             updated_at=now,
         )
 
-        return await self._salon_repo.update_appointment(actor, organization_id, business_id, updated_record)
+        rescheduled = await self._salon_repo.update_appointment(actor, organization_id, business_id, updated_record)
+        await self._sync_reminders_rescheduled(rescheduled, staff)
+        return rescheduled
 
     async def cancel_appointment(
         self,
@@ -923,7 +993,34 @@ class SalonWorkflowService:
             updated_at=now,
         )
 
-        return await self._salon_repo.update_appointment(actor, organization_id, business_id, cancelled_record)
+        cancelled = await self._salon_repo.update_appointment(actor, organization_id, business_id, cancelled_record)
+        await self._sync_reminders_invalidated(
+            organization_id,
+            business_id,
+            cancelled.id,
+            reason="appointment_cancelled",
+        )
+        return cancelled
+
+    async def invalidate_reminders_for_terminal_status(
+        self,
+        organization_id: UUID,
+        business_id: UUID,
+        appointment_id: UUID,
+        new_status: SalonAppointmentStatus,
+    ) -> None:
+        """Invalidate pending reminders when an appointment transitions to completed/no_show/cancelled."""
+        if new_status in {
+            SalonAppointmentStatus.CANCELLED,
+            SalonAppointmentStatus.COMPLETED,
+            SalonAppointmentStatus.NO_SHOW,
+        }:
+            await self._sync_reminders_invalidated(
+                organization_id,
+                business_id,
+                appointment_id,
+                reason=f"appointment_{new_status.value}",
+            )
 
 
 def get_salon_repository(
@@ -976,6 +1073,7 @@ def build_salon_workflow_service(
     settings: Optional[Settings] = None,
     salon_repo: Optional[SalonRepositoryProtocol] = None,
     onboarding_repo: Optional[OnboardingRepositoryProtocol] = None,
+    reminder_service: Optional["AppointmentReminderService"] = None,
 ) -> SalonWorkflowService:
     """Pure composition factory for SalonWorkflowService (no FastAPI Depends defaults).
 
@@ -993,11 +1091,20 @@ def build_salon_workflow_service(
         else get_onboarding_repository(settings=resolved_settings)
     )
 
-    if salon_repo is not None or onboarding_repo is not None:
+    resolved_reminder_service = reminder_service
+    if resolved_reminder_service is None and resolved_settings.sms_reminders_enabled:
+        from app.modules.notifications.service import build_appointment_reminder_service
+
+        resolved_reminder_service = build_appointment_reminder_service(
+            settings=resolved_settings
+        )
+
+    if salon_repo is not None or onboarding_repo is not None or reminder_service is not None:
         return SalonWorkflowService(
             settings=resolved_settings,
             salon_repo=resolved_salon_repo,
             onboarding_repo=resolved_onboarding_repo,
+            reminder_service=resolved_reminder_service,
         )
 
     cache_key = (
@@ -1011,6 +1118,7 @@ def build_salon_workflow_service(
             settings=resolved_settings,
             salon_repo=resolved_salon_repo,
             onboarding_repo=resolved_onboarding_repo,
+            reminder_service=resolved_reminder_service,
         )
         _salon_service_cache[cache_key] = cached
     return cached

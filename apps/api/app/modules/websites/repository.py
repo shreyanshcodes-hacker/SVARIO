@@ -494,7 +494,7 @@ class SupabaseRestBookingWebsiteRepository:
             resp = await client.post(
                 f"{self._base_url}/rest/v1/rpc/get_published_booking_website_by_slug",
                 headers={
-                    "apikey": self._anon_key,
+                    "apikey": bearer,
                     "Authorization": f"Bearer {bearer}",
                     "Content-Type": "application/json",
                 },

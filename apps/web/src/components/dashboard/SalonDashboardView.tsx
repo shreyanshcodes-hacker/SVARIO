@@ -324,10 +324,10 @@ export function SalonDashboardView({
         <div>
           <div className="flex items-center gap-2">
             <span className="font-mono text-xs font-semibold uppercase tracking-widest text-[#7657F6]">
-              Stage 5 Salon Workflow Module
+              Salon Operations
             </span>
             <span className="rounded-full border border-emerald-400/50 bg-emerald-500/10 px-2 py-0.5 font-mono text-[10px] text-emerald-300">
-              Live & Concurrency Protected
+              Live
             </span>
           </div>
           <h2 className="mt-1 text-2xl font-bold text-[#F5F7FC]">

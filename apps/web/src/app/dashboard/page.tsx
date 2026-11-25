@@ -3,8 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { SvarioLogoPlaceholder } from "@/components/SvarioLogoPlaceholder";
-import { StageIndicatorBadge } from "@/components/StageIndicatorBadge";
+import { SvarioBrandLogo } from "@/components/SvarioBrandLogo";
 import { OrganizationOnboardingForm } from "@/components/organizations/OrganizationOnboardingForm";
 import { OrganizationSwitcher } from "@/components/organizations/OrganizationSwitcher";
 import { useAuthOrganization } from "@/context/AuthOrganizationContext";
@@ -28,7 +27,6 @@ export default function DashboardPage(): React.JSX.Element {
     session,
     supabaseUser,
     verifiedBackendUser,
-    backendAuthError,
     organizations,
     activeOrganization,
     signOut,
@@ -121,8 +119,7 @@ export default function DashboardPage(): React.JSX.Element {
     (typeof supabaseUser?.user_metadata?.full_name === "string"
       ? supabaseUser.user_metadata.full_name
       : null) ??
-    "Svario Operator";
-  const displayUserId = verifiedBackendUser?.id ?? supabaseUser?.id ?? "—";
+    "Svario User";
 
   const isCompleted = Boolean(onboardingBundle?.progress?.is_completed);
   const completedStepsCount =
@@ -136,9 +133,8 @@ export default function DashboardPage(): React.JSX.Element {
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-4">
             <Link href="/">
-              <SvarioLogoPlaceholder />
+              <SvarioBrandLogo />
             </Link>
-            <StageIndicatorBadge />
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
@@ -184,20 +180,17 @@ export default function DashboardPage(): React.JSX.Element {
       <main className="mx-auto max-w-7xl space-y-8 px-6 py-10">
         {/* Top Status Overview */}
         <section
-          aria-label="Operator and Organization Status"
-          className="grid gap-5 md:grid-cols-2 lg:grid-cols-4"
+          aria-label="Account and Workspace Summary"
+          className="grid gap-5 md:grid-cols-3"
         >
           <div className="rounded-2xl border border-[#A7B0C4]/20 bg-[#171D33]/90 p-5">
             <div className="font-mono text-[11px] uppercase tracking-wider text-[#A7B0C4]">
-              Logged-In User
+              Account
             </div>
             <div className="mt-2 text-lg font-bold text-[#F5F7FC]">
               {displayName}
             </div>
             <div className="mt-0.5 text-xs text-[#36C6D3]">{displayEmail}</div>
-            <div className="mt-2 truncate font-mono text-[10px] text-[#A7B0C4]">
-              ID: {displayUserId}
-            </div>
           </div>
 
           <div className="rounded-2xl border border-[#A7B0C4]/20 bg-[#171D33]/90 p-5">
@@ -207,9 +200,9 @@ export default function DashboardPage(): React.JSX.Element {
             <div className="mt-2 text-lg font-bold text-[#F5F7FC]">
               {activeOrganization ? activeOrganization.name : "None Selected"}
             </div>
-            <div className="mt-0.5 font-mono text-xs text-[#A7B0C4]">
+            <div className="mt-0.5 text-xs text-[#A7B0C4]">
               {activeOrganization
-                ? `slug: ${activeOrganization.slug}`
+                ? `${organizations.length} ${organizations.length === 1 ? "workspace" : "workspaces"}`
                 : "Create an organization below"}
             </div>
           </div>
@@ -229,40 +222,15 @@ export default function DashboardPage(): React.JSX.Element {
               )}
             </div>
             <div className="mt-2 text-xs text-[#A7B0C4]">
-              Total memberships: {organizations.length}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-[#A7B0C4]/20 bg-[#171D33]/90 p-5">
-            <div className="font-mono text-[11px] uppercase tracking-wider text-[#A7B0C4]">
-              Authentication Status
-            </div>
-            <div className="mt-2 flex items-center gap-2">
-              <span
-                className={`h-2.5 w-2.5 rounded-full ${
-                  verifiedBackendUser ? "bg-[#36C6D3]" : "bg-amber-400"
-                }`}
-              />
-              <span className="text-sm font-bold text-[#F5F7FC]">
-                {verifiedBackendUser
-                  ? "Verified by FastAPI JWT"
-                  : "Session Active (Backend Pending)"}
-              </span>
-            </div>
-            <div className="mt-2 text-xs text-[#A7B0C4]">
-              {backendAuthError
-                ? `API Note: ${backendAuthError}`
-                : verifiedBackendUser
-                  ? `Audience: ${verifiedBackendUser.audience}`
-                  : "Awaiting GET /api/v1/auth/me"}
+              {isCompleted ? "Setup complete" : `Setup progress: ${completedStepsCount}/8 steps`}
             </div>
           </div>
         </section>
 
         {/* Organization Onboarding or Active Workspace */}
         {isLoadingOrganizations ? (
-          <div className="rounded-2xl border border-[#A7B0C4]/20 bg-[#171D33]/70 p-8 text-center font-mono text-xs text-[#A7B0C4]">
-            Loading organization memberships from Svario API...
+          <div className="rounded-2xl border border-[#A7B0C4]/20 bg-[#171D33]/70 p-8 text-center text-xs text-[#A7B0C4]">
+            Loading your workspaces...
           </div>
         ) : organizations.length === 0 || showCreateModal ? (
           <OrganizationOnboardingForm
@@ -279,14 +247,11 @@ export default function DashboardPage(): React.JSX.Element {
               <div className="flex flex-col justify-between gap-4 border-b border-[#A7B0C4]/15 pb-6 sm:flex-row sm:items-center">
                 <div>
                   <span className="font-mono text-xs font-semibold uppercase tracking-widest text-[#36C6D3]">
-                    STAGE 2 ORGANIZATION & BUSINESS WORKSPACE
+                    BUSINESS WORKSPACE
                   </span>
                   <h1 className="mt-1 text-2xl font-bold text-[#F5F7FC]">
                     {activeOrganization.name}
                   </h1>
-                  <p className="mt-1 font-mono text-xs text-[#A7B0C4]">
-                    Organization ID: {activeOrganization.id}
-                  </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
@@ -306,15 +271,15 @@ export default function DashboardPage(): React.JSX.Element {
                     className="rounded-xl bg-[#7657F6] px-4 py-2 text-xs font-semibold text-white transition hover:bg-[#6546e6]"
                   >
                     {isCompleted
-                      ? "Edit Business Onboarding Settings"
-                      : "Continue Business Onboarding"}
+                      ? "Edit Business Settings"
+                      : "Continue Onboarding"}
                   </Link>
                 </div>
               </div>
 
               {isLoadingBundle && (
-                <div className="rounded-xl border border-[#A7B0C4]/15 bg-[#0B1020]/60 p-4 font-mono text-xs text-[#36C6D3]">
-                  Syncing Stage 2 business onboarding configuration...
+                <div className="rounded-xl border border-[#A7B0C4]/15 bg-[#0B1020]/60 p-4 text-xs text-[#36C6D3]">
+                  Loading your business configuration...
                 </div>
               )}
 
@@ -505,10 +470,10 @@ export default function DashboardPage(): React.JSX.Element {
                   </div>
                 </div>
 
-                {/* 6. Industry & Role Boundary */}
+                {/* 6. Workspace Privacy */}
                 <div className="rounded-xl border border-[#A7B0C4]/15 bg-[#0B1020]/80 p-5">
                   <div className="font-mono text-[10px] uppercase tracking-wider text-[#A7B0C4]">
-                    Industry Module & Healthcare Safeguards
+                    Workspace &amp; Safeguards
                   </div>
                   <div className="mt-2 text-base font-semibold capitalize text-[#F5F7FC]">
                     {activeOrganization.industry} ({activeOrganization.membership_role})
@@ -517,7 +482,7 @@ export default function DashboardPage(): React.JSX.Element {
                     {activeOrganization.industry === "clinic" ||
                     activeOrganization.industry === "hospital"
                       ? "Administrative-only healthcare mode enforced: no clinical advice, diagnosis, or prescriptions."
-                      : "Isolated under PostgreSQL RLS & FastAPI membership checks."}
+                      : "Your salon profile, services, and appointments are privately isolated to your workspace."}
                   </p>
                 </div>
               </div>

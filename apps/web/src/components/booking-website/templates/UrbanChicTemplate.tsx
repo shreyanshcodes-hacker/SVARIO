@@ -215,14 +215,16 @@ export function UrbanChicTemplate({ data, onBookClick }: TemplateComponentProps)
         </div>
       </section>
 
-      <footer className="border-t-2 border-[#12131F] bg-[#FEF08A] px-6 py-6 text-xs font-bold text-[#12131F]">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4">
-          <span>{data.business.display_name} · Powered by Svario</span>
-          <div className="flex gap-4">
-            {igHref && <a href={igHref} target="_blank" rel="noreferrer" className="underline">Instagram</a>}
-            {fbHref && <a href={fbHref} target="_blank" rel="noreferrer" className="underline">Facebook</a>}
-            {waHref && <a href={waHref} target="_blank" rel="noreferrer" className="underline">WhatsApp</a>}
-          </div>
+      <footer className="border-t-2 border-[#12131F] bg-[#FEF08A] px-6 pt-6 pb-2 text-center text-xs font-bold text-[#12131F]">
+        <div className="mx-auto flex max-w-6xl flex-col items-center justify-center gap-3">
+          <span>{data.business.display_name}</span>
+          {(igHref || fbHref || waHref) && (
+            <div className="flex flex-wrap justify-center gap-4">
+              {igHref && <a href={igHref} target="_blank" rel="noreferrer" className="underline">Instagram</a>}
+              {fbHref && <a href={fbHref} target="_blank" rel="noreferrer" className="underline">Facebook</a>}
+              {waHref && <a href={waHref} target="_blank" rel="noreferrer" className="underline">WhatsApp</a>}
+            </div>
+          )}
         </div>
       </footer>
     </div>

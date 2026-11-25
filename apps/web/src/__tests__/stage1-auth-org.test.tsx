@@ -141,7 +141,7 @@ describe("SVARIO Stage 1 — Frontend Auth & Organization Experience", () => {
     expect(screen.getByText("Ananya Rao")).toBeTruthy();
     expect(screen.getByText("operator@svario.ai")).toBeTruthy();
     expect(screen.getAllByText("Lumiere Salon Studio").length).toBeGreaterThan(0);
-    expect(screen.getByText("Verified by FastAPI JWT")).toBeTruthy();
+    expect(screen.getByText("Active Organization")).toBeTruthy();
 
     // Switch organization using the OrganizationSwitcher dropdown
     const switcher = screen.getByLabelText(

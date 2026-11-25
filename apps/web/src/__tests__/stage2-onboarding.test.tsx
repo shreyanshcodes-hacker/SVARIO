@@ -453,7 +453,7 @@ describe("SVARIO Stage 2 — Onboarding Wizard & Dashboard Integration", () => {
     expect(screen.getByText("Hindi")).toBeTruthy();
     expect(screen.getByText("Meera")).toBeTruthy();
     expect(
-      screen.getByText("Edit Business Onboarding Settings")
+      screen.getByText("Edit Business Settings")
     ).toBeTruthy();
   });
 });
