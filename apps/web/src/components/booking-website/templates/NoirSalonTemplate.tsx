@@ -32,27 +32,27 @@ export function NoirSalonTemplate({ data, onBookClick }: TemplateComponentProps)
     >
       {/* Architectural Top Bar */}
       <header className="border-b border-white/15">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-3">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3.5 sm:px-6 sm:py-4">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             {data.logo_url && (
               <img
                 src={data.logo_url}
                 alt={`${data.business.display_name} logo`}
-                className="h-8 w-8 object-cover grayscale"
+                className="h-8 w-8 shrink-0 object-cover grayscale"
               />
             )}
-            <span className="text-sm font-bold tracking-[0.24em] uppercase">
+            <span className="break-words text-xs font-bold tracking-[0.2em] uppercase sm:text-sm sm:tracking-[0.24em]">
               {data.business.display_name}
             </span>
           </div>
-          <div className="flex items-center gap-6">
+          <div className="flex shrink-0 items-center gap-4 sm:gap-6">
             <span className="hidden font-mono text-[11px] uppercase text-zinc-400 md:inline">
               {data.business.city || "STUDIO"} / {data.business.timezone}
             </span>
             <button
               type="button"
               onClick={() => onBookClick?.()}
-              className={`${radius} bg-white px-4 py-2 text-xs font-bold tracking-[0.14em] uppercase text-[#111214] transition hover:bg-zinc-200`}
+              className={`${radius} min-h-[40px] bg-white px-3.5 py-2 text-xs font-bold tracking-[0.14em] uppercase text-[#111214] transition hover:bg-zinc-200 sm:px-4`}
             >
               Book Slot
             </button>
@@ -62,33 +62,33 @@ export function NoirSalonTemplate({ data, onBookClick }: TemplateComponentProps)
 
       {/* Asymmetric Architectural Hero Grid */}
       <section className="mx-auto grid max-w-6xl border-b border-white/15 lg:grid-cols-12">
-        <div className="flex flex-col justify-between border-b border-white/15 p-8 lg:col-span-7 lg:border-r lg:border-b-0 lg:p-12">
+        <div className="flex min-w-0 flex-col justify-between border-b border-white/15 p-5 sm:p-8 lg:col-span-7 lg:border-r lg:border-b-0 lg:p-12">
           <div>
-            <p className="font-mono text-xs uppercase tracking-[0.22em] text-zinc-400">
+            <p className="font-mono text-xs uppercase tracking-[0.2em] text-zinc-400 sm:tracking-[0.22em]">
               CONTEMPORARY HAIR & GROOMING
             </p>
-            <h1 className="mt-5 text-4xl font-black uppercase leading-[1.03] tracking-tight sm:text-6xl">
+            <h1 className="mt-4 break-words text-3xl font-black uppercase leading-[1.03] tracking-tight sm:mt-5 sm:text-5xl lg:text-6xl">
               {data.headline || data.business.display_name}
             </h1>
           </div>
-          <div className="mt-10 space-y-6">
+          <div className="mt-8 space-y-5 sm:mt-10 sm:space-y-6">
             <p className="max-w-lg text-sm leading-relaxed text-zinc-300">
               {data.tagline ||
                 data.business.description ||
                 "Precision cuts, modern color architecture, and sharp styling built for today."}
             </p>
-            <div className="flex flex-wrap items-center gap-4">
+            <div className="flex flex-wrap items-center gap-3 sm:gap-4">
               <button
                 type="button"
                 onClick={() => onBookClick?.()}
-                className={`${radius} bg-white px-7 py-3.5 text-xs font-bold tracking-[0.18em] uppercase text-[#111214] transition hover:bg-zinc-200`}
+                className={`${radius} flex min-h-[44px] w-full items-center justify-center bg-white px-7 py-3.5 text-xs font-bold tracking-[0.18em] uppercase text-[#111214] transition hover:bg-zinc-200 sm:w-auto`}
               >
                 Book Appointment →
               </button>
               {data.business.phone && (
                 <a
                   href={`tel:${data.business.phone}`}
-                  className="font-mono text-xs text-zinc-400 hover:text-white"
+                  className="inline-flex min-h-[44px] items-center font-mono text-xs text-zinc-400 hover:text-white"
                 >
                   TEL {data.business.phone}
                 </a>
@@ -97,21 +97,21 @@ export function NoirSalonTemplate({ data, onBookClick }: TemplateComponentProps)
           </div>
         </div>
 
-        <div className="relative bg-[#18191C] lg:col-span-5">
+        <div className="relative min-w-0 bg-[#18191C] lg:col-span-5">
           {data.cover_image_url ? (
             <img
               src={data.cover_image_url}
               alt={`${data.business.display_name} studio`}
-              className="h-[320px] w-full object-cover contrast-110 lg:h-full lg:min-h-[420px]"
+              className="h-[240px] w-full object-cover contrast-110 sm:h-[320px] lg:h-full lg:min-h-[420px]"
             />
           ) : (
-            <div className="flex h-[300px] flex-col justify-between p-8 lg:h-full lg:min-h-[420px]">
+            <div className="flex h-[240px] flex-col justify-between p-6 sm:h-[300px] sm:p-8 lg:h-full lg:min-h-[420px]">
               <span className="font-mono text-xs text-zinc-500">NOIR // 04</span>
               <div>
-                <p className="text-3xl font-black uppercase tracking-tight text-white/90">
+                <p className="text-2xl font-black uppercase tracking-tight text-white/90 sm:text-3xl">
                   Sharp. Modern. Unapologetic.
                 </p>
-                <p className="mt-2 font-mono text-xs text-zinc-400">
+                <p className="mt-2 break-words font-mono text-xs text-zinc-400">
                   {fullAddress || data.business.display_name}
                 </p>
               </div>
@@ -122,11 +122,11 @@ export function NoirSalonTemplate({ data, onBookClick }: TemplateComponentProps)
 
       {/* Structured Service Matrix */}
       {data.show_services && (
-        <section id="services" className="mx-auto max-w-6xl border-b border-white/15 px-6 py-16">
+        <section id="services" className="mx-auto max-w-6xl border-b border-white/15 px-4 py-12 sm:px-6 sm:py-16">
           <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
             <div>
               <p className="font-mono text-xs uppercase tracking-[0.22em] text-zinc-500">01 / MENU</p>
-              <h2 className="mt-1 text-3xl font-black uppercase tracking-tight">Service Matrix</h2>
+              <h2 className="mt-1 text-2xl font-black uppercase tracking-tight sm:text-3xl">Service Matrix</h2>
             </div>
             <span className="font-mono text-xs text-zinc-400">
               {data.services.length} ACTIVE SERVICES
@@ -144,13 +144,13 @@ export function NoirSalonTemplate({ data, onBookClick }: TemplateComponentProps)
                   key={svc.id}
                   className="grid items-center gap-3 py-5 sm:grid-cols-12"
                 >
-                  <div className="sm:col-span-5">
-                    <h3 className="text-base font-bold uppercase tracking-wide text-white">{svc.name}</h3>
+                  <div className="min-w-0 sm:col-span-5">
+                    <h3 className="break-words text-base font-bold uppercase tracking-wide text-white">{svc.name}</h3>
                     {svc.description && (
-                      <p className="mt-1 text-xs text-zinc-400">{svc.description}</p>
+                      <p className="mt-1 break-words text-xs text-zinc-400">{svc.description}</p>
                     )}
                   </div>
-                  <div className="font-mono text-xs uppercase text-zinc-500 sm:col-span-2">
+                  <div className="min-w-0 truncate font-mono text-xs uppercase text-zinc-500 sm:col-span-2">
                     {svc.category || "STUDIO"}
                   </div>
                   <div className="font-mono text-xs text-zinc-400 sm:col-span-2">
@@ -163,7 +163,7 @@ export function NoirSalonTemplate({ data, onBookClick }: TemplateComponentProps)
                     <button
                       type="button"
                       onClick={() => onBookClick?.(svc)}
-                      className={`${radius} border border-white/30 px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-white transition hover:bg-white hover:text-[#111214]`}
+                      className={`${radius} min-h-[40px] shrink-0 border border-white/30 px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-white transition hover:bg-white hover:text-[#111214]`}
                     >
                       Book
                     </button>
@@ -176,26 +176,26 @@ export function NoirSalonTemplate({ data, onBookClick }: TemplateComponentProps)
       )}
 
       {/* Horizontal Hours & Studio Strip */}
-      <section className="mx-auto max-w-6xl px-6 py-14">
+      <section className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
         <div className="grid gap-8 md:grid-cols-12">
-          <div className="space-y-3 md:col-span-5">
+          <div className="min-w-0 space-y-3 md:col-span-5">
             <p className="font-mono text-xs uppercase tracking-[0.22em] text-zinc-500">02 / STUDIO</p>
-            <h2 className="text-2xl font-black uppercase">{data.business.display_name}</h2>
-            {fullAddress && <p className="text-xs text-zinc-400">{fullAddress}</p>}
+            <h2 className="break-words text-2xl font-black uppercase">{data.business.display_name}</h2>
+            {fullAddress && <p className="break-words text-xs text-zinc-400">{fullAddress}</p>}
             {data.receptionist.enabled && (
-              <p className="border-l-2 border-white pl-3 text-xs text-zinc-300">
+              <p className="break-words border-l-2 border-white pl-3 text-xs text-zinc-300">
                 AI Concierge ({data.receptionist.assistant_name || "Svario"}): {data.receptionist.greeting}
               </p>
             )}
           </div>
           {data.show_hours && (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:col-span-7">
+            <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4 md:col-span-7">
               {data.hours.map((h) => (
-                <div key={h.weekday} className="border border-white/15 bg-[#18191C] p-3">
+                <div key={h.weekday} className="min-w-0 border border-white/15 bg-[#18191C] p-2.5 sm:p-3">
                   <p className="font-mono text-[10px] uppercase text-zinc-500">
                     {formatShortWeekday(h.weekday)}
                   </p>
-                  <p className="mt-1 font-mono text-xs text-white">{formatHourRange(h)}</p>
+                  <p className="mt-1 break-words font-mono text-xs text-white">{formatHourRange(h)}</p>
                 </div>
               ))}
             </div>
@@ -203,14 +203,14 @@ export function NoirSalonTemplate({ data, onBookClick }: TemplateComponentProps)
         </div>
       </section>
 
-      <footer className="border-t border-white/15 bg-[#0B0C0D] px-6 py-6 text-center">
+      <footer className="border-t border-white/15 bg-[#0B0C0D] px-4 py-6 text-center sm:px-6">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-center gap-3 font-mono text-[11px] uppercase text-zinc-500">
-          <span>© {data.business.display_name}</span>
+          <span className="break-words">© {data.business.display_name}</span>
           {(igHref || fbHref || waHref) && (
             <div className="flex flex-wrap justify-center gap-5">
-              {igHref && <a href={igHref} target="_blank" rel="noreferrer" className="hover:text-white">IG</a>}
-              {fbHref && <a href={fbHref} target="_blank" rel="noreferrer" className="hover:text-white">FB</a>}
-              {waHref && <a href={waHref} target="_blank" rel="noreferrer" className="hover:text-white">WA</a>}
+              {igHref && <a href={igHref} target="_blank" rel="noreferrer" className="py-1 hover:text-white">IG</a>}
+              {fbHref && <a href={fbHref} target="_blank" rel="noreferrer" className="py-1 hover:text-white">FB</a>}
+              {waHref && <a href={waHref} target="_blank" rel="noreferrer" className="py-1 hover:text-white">WA</a>}
             </div>
           )}
         </div>

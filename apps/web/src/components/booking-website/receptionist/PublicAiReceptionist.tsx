@@ -270,14 +270,14 @@ export function PublicAiReceptionist({
     <>
       {/* Tasteful Floating Template-Aware Launcher (bottom-right, never blocks hero/nav) */}
       {!isOpen && (
-        <div className="fixed right-4 bottom-4 z-40 sm:right-6 sm:bottom-6">
+        <div className="fixed right-[max(1rem,env(safe-area-inset-right))] bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 max-w-[calc(100vw-2rem)] sm:right-6 sm:bottom-6">
           <button
             type="button"
             data-testid="public-ai-receptionist-launcher"
             data-template-theme={theme.templateId}
             aria-label={`Talk to ${receptionistName}`}
             onClick={onOpen}
-            className={`group flex items-center gap-2.5 border px-4 py-3 text-xs font-semibold transition-transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 ${theme.buttonRadiusClass} ${theme.launcherShadowClass}`}
+            className={`group flex min-h-[44px] items-center gap-2.5 border px-4 py-2.5 text-xs font-semibold transition-transform hover:-translate-y-0.5 focus:outline-none focus:ring-2 ${theme.buttonRadiusClass} ${theme.launcherShadowClass}`}
             style={{
               fontFamily: theme.fontFamily,
               backgroundColor: theme.accentBg,
@@ -287,9 +287,9 @@ export function PublicAiReceptionist({
           >
             <span
               aria-hidden="true"
-              className="inline-flex h-2.5 w-2.5 rounded-full bg-current opacity-90 animate-pulse"
+              className="inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-current opacity-90 animate-pulse"
             />
-            <span>Talk to AI Receptionist</span>
+            <span className="truncate">Talk to AI Receptionist</span>
           </button>
         </div>
       )}
@@ -302,11 +302,11 @@ export function PublicAiReceptionist({
           aria-label={`AI Receptionist for ${data.business.display_name}`}
           data-testid="public-ai-receptionist-panel"
           data-template-theme={theme.templateId}
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-3 backdrop-blur-xs sm:items-center sm:p-6"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] backdrop-blur-xs sm:items-center sm:p-6"
           style={{ fontFamily: theme.fontFamily }}
         >
           <div
-            className={`flex w-full max-w-md flex-col overflow-hidden rounded-3xl border ${theme.panelShadowClass}`}
+            className={`flex max-h-[calc(100dvh-1.25rem)] w-full max-w-md flex-col overflow-hidden rounded-3xl border sm:max-h-[90dvh] ${theme.panelShadowClass}`}
             style={{
               backgroundColor: theme.surfaceBg,
               borderColor: theme.borderColor,
@@ -315,15 +315,15 @@ export function PublicAiReceptionist({
           >
             {/* Header */}
             <div
-              className="flex items-start justify-between gap-3 border-b px-5 py-4"
+              className="flex shrink-0 items-start justify-between gap-3 border-b px-4 py-3.5 sm:px-5 sm:py-4"
               style={{
                 borderColor: theme.borderColor,
                 backgroundColor: theme.surfaceElevatedBg,
               }}
             >
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <span
-                  className="inline-block rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+                  className="inline-block max-w-full truncate rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
                   style={{
                     backgroundColor: theme.badgeBg,
                     color: theme.badgeText,
@@ -331,7 +331,7 @@ export function PublicAiReceptionist({
                 >
                   AI Receptionist · {data.business.display_name}
                 </span>
-                <h2 className={`mt-1.5 truncate text-lg ${theme.headingClass}`}>
+                <h2 className={`mt-1.5 truncate text-base sm:text-lg ${theme.headingClass}`}>
                   {receptionistName}
                 </h2>
               </div>
@@ -340,7 +340,7 @@ export function PublicAiReceptionist({
                 data-testid="close-ai-receptionist-button"
                 aria-label="Close AI Receptionist"
                 onClick={handleClosePanel}
-                className="rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition hover:opacity-80"
+                className="flex min-h-[40px] min-w-[40px] shrink-0 items-center justify-center rounded-xl border text-xs font-semibold transition hover:opacity-80 sm:min-h-[36px] sm:min-w-[36px]"
                 style={{
                   borderColor: theme.borderColor,
                   color: theme.textPrimary,
@@ -351,11 +351,11 @@ export function PublicAiReceptionist({
             </div>
 
             {/* Body */}
-            <div className="space-y-4 px-5 py-5">
+            <div className="min-h-0 flex-1 space-y-3.5 overflow-y-auto px-4 py-4 sm:space-y-4 sm:px-5 sm:py-5">
               {/* Selected Service Context Pill (if launched from a service card) */}
               {selectedService && (
                 <div
-                  className="rounded-2xl border px-3.5 py-2.5 text-xs"
+                  className="break-words rounded-2xl border px-3.5 py-2.5 text-xs"
                   style={{
                     borderColor: theme.borderColor,
                     backgroundColor: theme.surfaceElevatedBg,
@@ -368,7 +368,7 @@ export function PublicAiReceptionist({
 
               {/* Voice Status & Animated Template-Matched Orb */}
               <div
-                className="flex flex-col items-center rounded-2xl border px-5 py-6 text-center"
+                className="flex flex-col items-center rounded-2xl border px-4 py-5 text-center sm:px-5 sm:py-6"
                 style={{
                   borderColor: theme.borderColor,
                   backgroundColor: theme.surfaceElevatedBg,
@@ -376,7 +376,7 @@ export function PublicAiReceptionist({
               >
                 <div
                   data-testid="receptionist-voice-orb"
-                  className={`flex h-20 w-20 items-center justify-center rounded-full border-2 transition-all duration-300 ${
+                  className={`flex h-16 w-16 items-center justify-center rounded-full border-2 transition-all duration-300 sm:h-20 sm:w-20 ${
                     isOrbPulsing ? "scale-105 animate-pulse" : ""
                   }`}
                   style={{
@@ -396,7 +396,7 @@ export function PublicAiReceptionist({
 
                 <p
                   data-testid="receptionist-voice-status"
-                  className="mt-4 text-sm font-semibold"
+                  className="mt-3.5 text-sm font-semibold sm:mt-4"
                 >
                   {formatStatusLabel(snapshot.state, snapshot.isMuted)}
                 </p>
@@ -426,7 +426,7 @@ export function PublicAiReceptionist({
                 </div>
 
                 <p
-                  className="mt-3 max-w-xs text-xs leading-relaxed"
+                  className="mt-3 max-w-xs break-words text-xs leading-relaxed"
                   style={{ color: theme.textMuted }}
                 >
                   {greeting}
@@ -437,7 +437,7 @@ export function PublicAiReceptionist({
               {isPreview && (
                 <div
                   data-testid="receptionist-preview-notice"
-                  className="rounded-2xl border px-3.5 py-2.5 text-xs"
+                  className="break-words rounded-2xl border px-3.5 py-2.5 text-xs"
                   style={{
                     borderColor: theme.borderColor,
                     backgroundColor: theme.badgeBg,
@@ -446,18 +446,18 @@ export function PublicAiReceptionist({
                 >
                   Preview Mode: Styling automatically adapts to{" "}
                   <strong>{theme.templateName}</strong>. Live browser voice connects on your
-                  published <code>/s/{data.slug}</code> website.
+                  published <code className="break-all">/s/{data.slug}</code> website.
                 </div>
               )}
 
               {/* Autoplay Recovery Banner */}
               {snapshot.playbackState?.autoplayBlocked && (
-                <div className="flex items-center justify-between gap-2 rounded-2xl border border-amber-400/50 bg-amber-500/10 px-3.5 py-2.5 text-xs">
-                  <span>Browser paused AI audio playback.</span>
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-amber-400/50 bg-amber-500/10 px-3.5 py-2.5 text-xs">
+                  <span className="min-w-0 flex-1">Browser paused AI audio playback.</span>
                   <button
                     type="button"
                     onClick={() => void handleResumePlayback()}
-                    className={`${theme.buttonRadiusClass} px-3 py-1 font-semibold`}
+                    className={`min-h-[36px] shrink-0 px-3 py-1 font-semibold ${theme.buttonRadiusClass}`}
                     style={{
                       backgroundColor: theme.accentBg,
                       color: theme.accentText,
@@ -473,7 +473,7 @@ export function PublicAiReceptionist({
                 <div
                   role="alert"
                   data-testid="receptionist-voice-error"
-                  className="rounded-2xl border border-rose-500/45 bg-rose-500/10 px-3.5 py-2.5 text-xs text-rose-500"
+                  className="break-words rounded-2xl border border-rose-500/45 bg-rose-500/10 px-3.5 py-2.5 text-xs text-rose-500"
                 >
                   {snapshot.error?.message || snapshot.responseError?.message}
                 </div>
@@ -491,7 +491,7 @@ export function PublicAiReceptionist({
                         ? handleReconnect()
                         : handleStartCall())
                     }
-                    className={`flex-1 border px-4 py-3 text-xs font-semibold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 ${theme.buttonRadiusClass}`}
+                    className={`min-h-[44px] flex-1 border px-4 py-3 text-xs font-semibold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 ${theme.buttonRadiusClass}`}
                     style={{
                       backgroundColor: theme.accentBg,
                       color: theme.accentText,
@@ -510,7 +510,7 @@ export function PublicAiReceptionist({
                       type="button"
                       data-testid="mute-public-voice-button"
                       onClick={handleToggleMute}
-                      className={`flex-1 border px-3.5 py-2.5 text-xs font-semibold transition hover:opacity-85 ${theme.buttonRadiusClass}`}
+                      className={`min-h-[44px] min-w-[100px] flex-1 border px-3.5 py-2.5 text-xs font-semibold transition hover:opacity-85 ${theme.buttonRadiusClass}`}
                       style={{
                         borderColor: theme.borderColor,
                         backgroundColor: theme.surfaceElevatedBg,
@@ -525,7 +525,7 @@ export function PublicAiReceptionist({
                         type="button"
                         data-testid="interrupt-public-voice-button"
                         onClick={handleInterrupt}
-                        className={`border px-3.5 py-2.5 text-xs font-semibold transition hover:opacity-85 ${theme.buttonRadiusClass}`}
+                        className={`min-h-[44px] shrink-0 border px-3.5 py-2.5 text-xs font-semibold transition hover:opacity-85 ${theme.buttonRadiusClass}`}
                         style={{
                           borderColor: theme.borderColor,
                           backgroundColor: theme.badgeBg,
@@ -540,7 +540,7 @@ export function PublicAiReceptionist({
                       type="button"
                       data-testid="disconnect-public-voice-button"
                       onClick={handleEndCall}
-                      className={`border border-rose-500/60 bg-rose-600 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-rose-700 ${theme.buttonRadiusClass}`}
+                      className={`min-h-[44px] shrink-0 border border-rose-500/60 bg-rose-600 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-rose-700 ${theme.buttonRadiusClass}`}
                     >
                       End Call
                     </button>

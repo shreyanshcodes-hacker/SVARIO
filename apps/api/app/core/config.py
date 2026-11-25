@@ -258,6 +258,16 @@ class Settings(BaseSettings):
         return cleaned
 
     @property
+    def normalized_env(self) -> str:
+        """Return normalized lowercase SVARIO_ENV string."""
+        return (self.svario_env or "development").strip().lower()
+
+    @property
+    def is_production(self) -> bool:
+        """Return True when SVARIO_ENV is normalized to 'production'."""
+        return self.normalized_env == "production"
+
+    @property
     def cors_origins(self) -> List[str]:
         """Parse comma-separated CORS origins into a clean list."""
         return [

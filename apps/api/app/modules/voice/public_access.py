@@ -24,6 +24,19 @@ from app.modules.onboarding.schemas import OnboardingBundleResponse
 
 TOKEN_PREFIX = "svario_pub_v1"
 FALLBACK_DEV_HMAC_KEY = "svario-stage3-dev-public-voice-hmac-key-do-not-use-in-prod"
+MIN_PRODUCTION_HMAC_SECRET_LENGTH = 32
+_DISALLOWED_PROD_SECRET_LITERALS = frozenset(
+    {
+        FALLBACK_DEV_HMAC_KEY.lower(),
+        "changeme",
+        "change-me",
+        "secret",
+        "dev-secret",
+        "test-secret",
+        "default",
+        "example",
+    }
+)
 
 
 @dataclass
@@ -63,7 +76,41 @@ def get_public_voice_policy_registry() -> PublicVoicePolicyRegistry:
     return _public_policy_registry
 
 
+def validate_production_public_voice_secret(settings: Settings) -> str:
+    """Validate that a dedicated, strong VOICE_PUBLIC_TOKEN_SECRET is configured in production.
+
+    Fails closed without logging or exposing the secret value.
+    """
+    configured = settings.voice_public_token_secret
+    if configured is None:
+        raise RuntimeError(
+            "Startup aborted: SVARIO_ENV=production requires a dedicated VOICE_PUBLIC_TOKEN_SECRET."
+        )
+    cleaned = configured.strip()
+    if not cleaned:
+        raise RuntimeError(
+            "Startup aborted: VOICE_PUBLIC_TOKEN_SECRET must not be empty or whitespace-only in production."
+        )
+    lowered = cleaned.lower()
+    if (
+        lowered in _DISALLOWED_PROD_SECRET_LITERALS
+        or "placeholder" in lowered
+        or lowered.startswith("your-")
+    ):
+        raise RuntimeError(
+            "Startup aborted: VOICE_PUBLIC_TOKEN_SECRET must not use development fallback or placeholder values in production."
+        )
+    if len(cleaned) < MIN_PRODUCTION_HMAC_SECRET_LENGTH:
+        raise RuntimeError(
+            f"Startup aborted: VOICE_PUBLIC_TOKEN_SECRET must be at least {MIN_PRODUCTION_HMAC_SECRET_LENGTH} characters in production."
+        )
+    return cleaned
+
+
 def _resolve_signing_secret(settings: Settings) -> bytes:
+    if settings.is_production:
+        return validate_production_public_voice_secret(settings).encode("utf-8")
+
     configured = settings.voice_public_token_secret
     if (
         configured
