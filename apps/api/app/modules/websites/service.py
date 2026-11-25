@@ -5,12 +5,16 @@ from __future__ import annotations
 from collections import deque
 from datetime import datetime, timezone
 import re
+import threading
 import time
+import zlib
 from typing import Any, Deque, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 from fastapi import Depends, HTTPException, status
 from app.core.auth import AuthenticatedUser
 from app.core.config import Settings, get_settings
+from app.core.redis_provider import get_redis_client, raise_redis_unavailable
+from app.modules.voice.rate_limit import RedisRateLimiter
 from app.modules.onboarding.schemas import OnboardingBundleResponse
 from app.modules.onboarding.service import OnboardingService, get_onboarding_service
 from app.modules.organizations.schemas import OrganizationIndustry, OrganizationRole
@@ -53,24 +57,101 @@ PUBLIC_WEBSITE_ENGINE_READY = True
 class PublicWebsiteRateLimiter:
     """In-process sliding-window IP rate limiter for public /s/[slug] API endpoints."""
 
-    def __init__(self, *, max_requests: int = 60, window_seconds: int = 60) -> None:
+    def __init__(
+        self,
+        *,
+        max_requests: int = 60,
+        window_seconds: int = 60,
+        max_tracked_keys: int = 10_000,
+        num_lock_shards: int = 64,
+    ) -> None:
         self._max_requests = max_requests
         self._window_seconds = window_seconds
+        self._max_tracked_keys = max(1, max_tracked_keys)
         self._hits: Dict[str, Deque[float]] = {}
+        self._shard_locks = [threading.Lock() for _ in range(max(1, num_lock_shards))]
+        self._sweep_lock = threading.Lock()
+        self._last_sweep_at = time.monotonic()
+
+    def _lock_for(self, key: str) -> threading.Lock:
+        idx = zlib.crc32(key.encode("utf-8", errors="ignore")) % len(self._shard_locks)
+        return self._shard_locks[idx]
+
+    def reset(self) -> None:
+        """Clear all tracked client IP buckets."""
+        with self._sweep_lock:
+            self._hits.clear()
+            self._last_sweep_at = time.monotonic()
+
+    def _sweep_stale_keys(self, now: float) -> None:
+        """Reclaim expired/empty IP buckets without erasing active windows."""
+        if not self._sweep_lock.acquire(blocking=False):
+            return
+        try:
+            cutoff = now - float(self._window_seconds)
+            for key in list(self._hits.keys()):
+                with self._lock_for(key):
+                    bucket = self._hits.get(key)
+                    if bucket is None:
+                        continue
+                    while bucket and bucket[0] <= cutoff:
+                        bucket.popleft()
+                    if not bucket:
+                        self._hits.pop(key, None)
+
+            if len(self._hits) > self._max_tracked_keys:
+                excess = len(self._hits) - self._max_tracked_keys
+                for key in list(self._hits.keys())[:excess]:
+                    with self._lock_for(key):
+                        self._hits.pop(key, None)
+
+            self._last_sweep_at = now
+        finally:
+            self._sweep_lock.release()
+
+    def check_and_record(
+        self,
+        actor_key: str,
+        max_requests_per_window: Optional[int] = None,
+    ) -> None:
+        """Verify `actor_key` is within limit and record the request timestamp."""
+        limit = (
+            self._max_requests
+            if max_requests_per_window is None
+            else max_requests_per_window
+        )
+        now = time.monotonic()
+        key = (actor_key or "unknown").strip() or "unknown"
+        cutoff = now - float(self._window_seconds)
+
+        with self._lock_for(key):
+            bucket = self._hits.get(key)
+            if bucket is None:
+                bucket = deque()
+                self._hits[key] = bucket
+
+            while bucket and bucket[0] <= cutoff:
+                bucket.popleft()
+
+            if len(bucket) >= limit:
+                if not bucket:
+                    self._hits.pop(key, None)
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Too many requests. Please wait a moment and try again.",
+                )
+
+            bucket.append(now)
+
+        if (
+            len(self._hits) >= self._max_tracked_keys
+            or (now - self._last_sweep_at) >= float(self._window_seconds)
+        ):
+            self._sweep_stale_keys(now)
 
     def check(self, client_ip: str) -> None:
-        now = time.monotonic()
-        key = (client_ip or "unknown").strip() or "unknown"
-        bucket = self._hits.setdefault(key, deque())
-        cutoff = now - self._window_seconds
-        while bucket and bucket[0] < cutoff:
-            bucket.popleft()
-        if len(bucket) >= self._max_requests:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Too many requests. Please wait a moment and try again.",
-            )
-        bucket.append(now)
+        """Check and record a public website request for `client_ip`."""
+        self.check_and_record(client_ip, self._max_requests)
 
 
 _public_rate_limiter = PublicWebsiteRateLimiter(max_requests=60, window_seconds=60)
@@ -716,6 +797,25 @@ class BookingWebsiteService:
         return fetched
 
 
+def get_public_website_rate_limiter(
+    settings: Settings = Depends(get_settings),
+) -> Any:
+    """Return the configured public website rate limiter (Redis in prod, in-memory in dev/test)."""
+    redis_client = get_redis_client(settings)
+    if redis_client is not None:
+        return RedisRateLimiter(
+            redis_client=redis_client,
+            namespace="public_website",
+            window_seconds=60,
+            default_max_requests=60,
+            detail_message="Too many requests. Please wait a moment and try again.",
+            include_retry_after_header=False,
+        )
+    if settings.is_production:
+        raise raise_redis_unavailable()
+    return _public_rate_limiter
+
+
 def get_booking_website_service(
     settings: Settings = Depends(get_settings),
     onboarding_service: OnboardingService = Depends(get_onboarding_service),
@@ -726,4 +826,5 @@ def get_booking_website_service(
         settings=settings,
         onboarding_service=onboarding_service,
         website_repo=website_repo,
+        rate_limiter=get_public_website_rate_limiter(settings),
     )

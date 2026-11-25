@@ -15,16 +15,25 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import hashlib
+import json
 import secrets
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID, NAMESPACE_URL, uuid5
 from fastapi import Depends, HTTPException, status
+from app.core.redis_provider import (
+    RedisClientProtocol,
+    RedisUnavailableError,
+    get_redis_client,
+    raise_redis_unavailable,
+)
 from app.agents.schemas import (
     AgentToolName,
     VoiceToolExecutionRequest,
     VoiceToolExecutionResponse,
 )
 from app.core.config import Settings, get_settings
+from app.core.state_protocols import PublicSessionStoreProtocol
 from app.modules.onboarding.schemas import (
     AssistantPersonality,
     AssistantResponseStyle,
@@ -126,7 +135,113 @@ class PublicWebsiteVoiceSessionStore:
 _shared_session_store = PublicWebsiteVoiceSessionStore()
 
 
-def get_public_website_voice_session_store() -> PublicWebsiteVoiceSessionStore:
+class RedisPublicSessionStore:
+    """Distributed Redis-backed public website visitor voice session store."""
+
+    MAX_TTL_SECONDS = 600
+
+    def __init__(self, redis_client: RedisClientProtocol) -> None:
+        self._redis = redis_client
+
+    @staticmethod
+    def _key_for(token: str) -> str:
+        digest = hashlib.sha256((token or "").encode("utf-8")).hexdigest()
+        return f"svario:pub_sess:{digest}"
+
+    def clear(self) -> None:
+        return None
+
+    def put(self, token: str, record: _BoundPublicVoiceSession) -> None:
+        now = datetime.now(timezone.utc)
+        ttl_seconds = max(
+            1,
+            min(self.MAX_TTL_SECONDS, int((record.expires_at - now).total_seconds())),
+        )
+        payload = json.dumps(
+            {
+                "slug": record.slug,
+                "session_id": record.session_id,
+                "organization_id": str(record.organization_id),
+                "business_id": str(record.business_id),
+                "internal_public_token": record.internal_public_token,
+                "has_persistent_db_access": bool(record.has_persistent_db_access),
+                "expires_at": record.expires_at.isoformat(),
+            },
+            separators=(",", ":"),
+        )
+        try:
+            self._redis.execute(["SET", self._key_for(token), payload, "EX", ttl_seconds])
+        except RedisUnavailableError as exc:
+            raise raise_redis_unavailable() from exc
+
+    def revoke(self, token: str) -> None:
+        try:
+            self._redis.execute(["DEL", self._key_for(token)])
+        except RedisUnavailableError as exc:
+            raise raise_redis_unavailable() from exc
+
+    def verify(self, *, token: str, slug: str, session_id: str) -> _BoundPublicVoiceSession:
+        key = self._key_for(token)
+        try:
+            raw = self._redis.execute(["GET", key])
+        except RedisUnavailableError as exc:
+            raise raise_redis_unavailable() from exc
+
+        if not raw or not isinstance(raw, str):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invalid or expired public voice session token.",
+            )
+
+        try:
+            data = json.loads(raw)
+            rec = _BoundPublicVoiceSession(
+                slug=str(data["slug"]),
+                session_id=str(data["session_id"]),
+                organization_id=UUID(str(data["organization_id"])),
+                business_id=UUID(str(data["business_id"])),
+                internal_public_token=str(data["internal_public_token"]),
+                has_persistent_db_access=bool(data["has_persistent_db_access"]),
+                expires_at=datetime.fromisoformat(str(data["expires_at"])),
+            )
+        except Exception as exc:
+            try:
+                self._redis.execute(["DEL", key])
+            except RedisUnavailableError:
+                pass
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invalid or expired public voice session token.",
+            ) from exc
+
+        if rec.slug != slug or rec.session_id != session_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Public voice session token does not match this salon session.",
+            )
+
+        if rec.expires_at <= datetime.now(timezone.utc):
+            try:
+                self._redis.execute(["DEL", key])
+            except RedisUnavailableError:
+                pass
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Public voice session has expired.",
+            )
+
+        return rec
+
+
+def get_public_website_voice_session_store(
+    settings: Settings = Depends(get_settings),
+) -> PublicSessionStoreProtocol:
+    resolved = settings if isinstance(settings, Settings) else get_settings()
+    redis_client = get_redis_client(resolved)
+    if redis_client is not None:
+        return RedisPublicSessionStore(redis_client)
+    if resolved.is_production:
+        raise raise_redis_unavailable()
     return _shared_session_store
 
 
@@ -260,7 +375,7 @@ class PublicWebsiteVoiceBridgeService:
         settings: Settings,
         website_service: BookingWebsiteService,
         voice_service: VoiceSessionService,
-        session_store: Optional[PublicWebsiteVoiceSessionStore] = None,
+        session_store: Optional[PublicSessionStoreProtocol] = None,
     ) -> None:
         self._settings = settings
         self._website_service = website_service
@@ -411,6 +526,11 @@ class PublicWebsiteVoiceBridgeService:
         site = await self._website_service.get_public_website_by_slug(
             slug=normalized, client_ip=client_ip
         )
+        if getattr(site, "published", True) is False:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="AI receptionist is not available for an unpublished salon website.",
+            )
         if not site.show_ai_receptionist or not site.receptionist.enabled:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -491,6 +611,14 @@ class PublicWebsiteVoiceBridgeService:
                 detected_language=LanguageCode("en"),
             )
 
+        # Refresh handling worker's runtime policy registry from authoritative Supabase state
+        refreshed_bundle = _build_allowlisted_bundle_from_public_site(
+            site,
+            organization_id=bound.organization_id,
+            business_id=bound.business_id,
+        )
+        self._voice_service._public_registry.register_bundle(refreshed_bundle)
+
         return await self._voice_service.execute_voice_tool(
             actor=None,
             client_ip=client_ip,
@@ -511,7 +639,7 @@ def get_public_website_voice_bridge_service(
     settings: Settings = Depends(get_settings),
     website_service: BookingWebsiteService = Depends(get_booking_website_service),
     voice_service: VoiceSessionService = Depends(get_voice_session_service),
-    session_store: PublicWebsiteVoiceSessionStore = Depends(get_public_website_voice_session_store),
+    session_store: PublicSessionStoreProtocol = Depends(get_public_website_voice_session_store),
 ) -> PublicWebsiteVoiceBridgeService:
     return PublicWebsiteVoiceBridgeService(
         settings=settings,

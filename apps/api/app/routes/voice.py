@@ -18,6 +18,8 @@ from app.core.auth import (
     get_current_user,
     get_jwt_verifier,
 )
+from app.core.client_ip import resolve_client_ip
+from app.core.config import Settings, get_settings
 from app.modules.voice.schemas import (
     PublicVoiceTokenCreateRequest,
     PublicVoiceTokenResponse,
@@ -27,15 +29,6 @@ from app.modules.voice.schemas import (
 from app.modules.voice.service import VoiceSessionService, get_voice_session_service
 
 router = APIRouter(prefix="/api/v1", tags=["Voice & Agent (Stage 3–4)"])
-
-
-def _extract_client_ip(request: Request) -> str:
-    forwarded_for = request.headers.get("x-forwarded-for")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip() or "unknown"
-    if request.client and request.client.host:
-        return request.client.host
-    return "unknown"
 
 
 async def get_optional_current_user(
@@ -63,12 +56,13 @@ async def create_voice_session(
     payload: VoiceSessionCreateRequest,
     request: Request,
     actor: Optional[AuthenticatedUser] = Depends(get_optional_current_user),
+    settings: Settings = Depends(get_settings),
     service: VoiceSessionService = Depends(get_voice_session_service),
 ) -> VoiceSessionCreateResponse:
     """Create a short-lived WebRTC session credential after verifying business authorization."""
     return await service.create_voice_session(
         actor=actor,
-        client_ip=_extract_client_ip(request),
+        client_ip=resolve_client_ip(request, settings),
         payload=payload,
     )
 
@@ -103,12 +97,13 @@ async def execute_voice_tool(
     payload: VoiceToolExecutionRequest,
     request: Request,
     actor: Optional[AuthenticatedUser] = Depends(get_optional_current_user),
+    settings: Settings = Depends(get_settings),
     service: VoiceSessionService = Depends(get_voice_session_service),
 ) -> VoiceToolExecutionResponse:
     """Execute one of the 5 structured Stage 4 tools on behalf of an active voice session."""
     return await service.execute_voice_tool(
         actor=actor,
-        client_ip=_extract_client_ip(request),
+        client_ip=resolve_client_ip(request, settings),
         payload=payload,
     )
 
@@ -123,12 +118,13 @@ async def process_agent_turn(
     payload: AgentTurnRequest,
     request: Request,
     actor: Optional[AuthenticatedUser] = Depends(get_optional_current_user),
+    settings: Settings = Depends(get_settings),
     service: VoiceSessionService = Depends(get_voice_session_service),
 ) -> AgentTurnResponse:
     """Run intent recognition, tool execution, safety checks, and response composition."""
     return await service.process_agent_turn(
         actor=actor,
-        client_ip=_extract_client_ip(request),
+        client_ip=resolve_client_ip(request, settings),
         payload=payload,
     )
 

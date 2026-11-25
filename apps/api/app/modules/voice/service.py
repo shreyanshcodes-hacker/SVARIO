@@ -38,6 +38,7 @@ from app.agents.schemas import (
 )
 from app.core.auth import AuthenticatedUser
 from app.core.config import Settings, get_settings
+from app.core.state_protocols import PolicyRegistryProtocol, RateLimiterProtocol
 from app.modules.onboarding.schemas import OnboardingBundleResponse
 from app.modules.onboarding.service import OnboardingService, get_onboarding_service
 from app.modules.organizations.schemas import OrganizationIndustry, OrganizationRole
@@ -197,8 +198,8 @@ class VoiceSessionService:
         self,
         settings: Settings,
         onboarding_service: OnboardingService,
-        rate_limiter: VoiceSessionRateLimiter,
-        public_registry: PublicVoicePolicyRegistry,
+        rate_limiter: RateLimiterProtocol,
+        public_registry: PolicyRegistryProtocol,
         upstream_mint: RealtimeUpstreamCallable = _default_openai_realtime_mint,
         orchestrator: Optional[AgentOrchestrator] = None,
     ) -> None:
@@ -542,8 +543,8 @@ class VoiceSessionService:
 def get_voice_session_service(
     settings: Settings = Depends(get_settings),
     onboarding_service: OnboardingService = Depends(get_onboarding_service),
-    rate_limiter: VoiceSessionRateLimiter = Depends(get_voice_rate_limiter),
-    public_registry: PublicVoicePolicyRegistry = Depends(get_public_voice_policy_registry),
+    rate_limiter: RateLimiterProtocol = Depends(get_voice_rate_limiter),
+    public_registry: PolicyRegistryProtocol = Depends(get_public_voice_policy_registry),
     orchestrator: AgentOrchestrator = Depends(get_agent_orchestrator),
 ) -> VoiceSessionService:
     """FastAPI dependency returning a configured VoiceSessionService."""

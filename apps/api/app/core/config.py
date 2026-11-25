@@ -1,8 +1,9 @@
 """Environment-based Pydantic configuration for Svario API (Stage 0, Stage 1, Stage 2 & Stage 3)."""
 
 from functools import lru_cache
+import ipaddress
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple, Union
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -46,6 +47,10 @@ class Settings(BaseSettings):
     cors_origins_raw: str = Field(
         default="http://localhost:3000,http://127.0.0.1:3000",
         validation_alias="CORS_ORIGINS",
+    )
+    trusted_proxies_raw: str = Field(
+        default="",
+        validation_alias="TRUSTED_PROXIES",
     )
 
     # --- Stage 1: Supabase & JWT Verification Configuration ---
@@ -118,6 +123,23 @@ class Settings(BaseSettings):
         ge=60,
         le=86400,
         validation_alias="VOICE_PUBLIC_TOKEN_TTL_SECONDS",
+    )
+
+    # --- Stage 3B-2: Distributed Redis State Configuration (Upstash REST) ---
+    upstash_redis_rest_url: Optional[str] = Field(
+        default=None,
+        validation_alias="UPSTASH_REDIS_REST_URL",
+    )
+    upstash_redis_rest_token: Optional[str] = Field(
+        default=None,
+        validation_alias="UPSTASH_REDIS_REST_TOKEN",
+        repr=False,
+    )
+    redis_timeout_seconds: float = Field(
+        default=2.0,
+        ge=0.2,
+        le=10.0,
+        validation_alias="REDIS_TIMEOUT_SECONDS",
     )
 
     # --- Stage 12B: SMS Reminder Engine Foundation (Noop-only, disabled by default) ---
@@ -257,6 +279,35 @@ class Settings(BaseSettings):
             raise ValueError("OPENAI_REALTIME_MODEL must be a valid model identifier.")
         return cleaned
 
+    @field_validator("trusted_proxies_raw")
+    @classmethod
+    def validate_trusted_proxies(cls, value: str) -> str:
+        """Validate comma-separated IPv4/IPv6 addresses or CIDR ranges."""
+        for raw_entry in (value or "").split(","):
+            entry = raw_entry.strip()
+            if not entry:
+                continue
+            try:
+                ipaddress.ip_network(entry, strict=False)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Invalid TRUSTED_PROXIES entry '{entry}': must be a valid IPv4/IPv6 address or CIDR range."
+                ) from exc
+        return value
+
+    @property
+    def trusted_proxy_networks(
+        self,
+    ) -> Tuple[Union[ipaddress.IPv4Network, ipaddress.IPv6Network], ...]:
+        """Return parsed trusted proxy IPv4/IPv6 networks."""
+        networks: List[Union[ipaddress.IPv4Network, ipaddress.IPv6Network]] = []
+        for raw_entry in (self.trusted_proxies_raw or "").split(","):
+            entry = raw_entry.strip()
+            if not entry:
+                continue
+            networks.append(ipaddress.ip_network(entry, strict=False))
+        return tuple(networks)
+
     @property
     def normalized_env(self) -> str:
         """Return normalized lowercase SVARIO_ENV string."""
@@ -266,6 +317,22 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         """Return True when SVARIO_ENV is normalized to 'production'."""
         return self.normalized_env == "production"
+
+    @property
+    def is_upstash_redis_configured(self) -> bool:
+        """Return True when non-placeholder Upstash REST URL and token are set."""
+        url = (self.upstash_redis_rest_url or "").strip()
+        tok = (self.upstash_redis_rest_token or "").strip()
+        if not url or not tok:
+            return False
+        if "placeholder" in url.lower() or "placeholder" in tok.lower() or tok.startswith("your-"):
+            return False
+        return True
+
+    @property
+    def is_redis_configured(self) -> bool:
+        """Return True when Upstash Redis REST is configured."""
+        return self.is_upstash_redis_configured
 
     @property
     def cors_origins(self) -> List[str]:

@@ -1,9 +1,11 @@
 """API routes for White-Label Booking Website Engine (Stage 1 Dashboard + Stage 2 Public Engine)."""
 
 from uuid import UUID
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from app.agents.schemas import VoiceToolExecutionResponse
 from app.core.auth import AuthenticatedUser, get_current_user
+from app.core.client_ip import resolve_client_ip
+from app.core.config import Settings, get_settings
 from app.modules.websites.public_voice import (
     PublicWebsiteVoiceBridgeService,
     get_public_website_voice_bridge_service,
@@ -20,6 +22,7 @@ from app.modules.websites.schemas import (
 )
 from app.modules.websites.service import (
     BookingWebsiteService,
+    MAX_BRAND_ASSET_BYTES,
     get_booking_website_service,
 )
 
@@ -33,14 +36,52 @@ public_router = APIRouter(
     tags=["Public Booking Website (Stage 2)"],
 )
 
+UPLOAD_STREAM_CHUNK_SIZE = 64 * 1024  # 64 KiB
 
-def _extract_client_ip(request: Request) -> str:
-    forwarded_for = request.headers.get("x-forwarded-for")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip() or "unknown"
-    if request.client and request.client.host:
-        return request.client.host
-    return "unknown"
+
+async def read_bounded_body(
+    request: Request,
+    max_bytes: int = MAX_BRAND_ASSET_BYTES,
+    chunk_size: int = UPLOAD_STREAM_CHUNK_SIZE,
+) -> bytes:
+    """Read request body incrementally up to `max_bytes`, failing fast with HTTP 413."""
+    raw_content_length = request.headers.get("content-length")
+    if raw_content_length is not None:
+        try:
+            advertised_length = int(raw_content_length.strip())
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid Content-Length header.",
+            ) from exc
+        if advertised_length < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid Content-Length header.",
+            )
+        if advertised_length > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="Image file must be at most 2 MB.",
+            )
+
+    buffer = bytearray()
+    async for raw_chunk in request.stream():
+        if not raw_chunk:
+            continue
+        offset = 0
+        chunk_len = len(raw_chunk)
+        while offset < chunk_len:
+            piece = raw_chunk[offset : offset + chunk_size]
+            offset += chunk_size
+            remaining = max_bytes - len(buffer)
+            if len(piece) > remaining:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail="Image file must be at most 2 MB.",
+                )
+            buffer.extend(piece)
+    return bytes(buffer)
 
 
 @router.get(
@@ -106,7 +147,7 @@ async def upload_booking_website_asset(
     actor: AuthenticatedUser = Depends(get_current_user),
     service: BookingWebsiteService = Depends(get_booking_website_service),
 ) -> BrandAssetUploadResponse:
-    data = await request.body()
+    data = await read_bounded_body(request, max_bytes=MAX_BRAND_ASSET_BYTES)
     content_type = request.headers.get("content-type", "")
     return await service.upload_brand_asset(
         actor=actor,
@@ -158,10 +199,11 @@ async def unpublish_booking_website(
 async def get_public_booking_website(
     slug: str,
     request: Request,
+    settings: Settings = Depends(get_settings),
     service: BookingWebsiteService = Depends(get_booking_website_service),
 ) -> PublicBookingWebsiteResponse:
     return await service.get_public_website_by_slug(
-        slug=slug, client_ip=_extract_client_ip(request)
+        slug=slug, client_ip=resolve_client_ip(request, settings)
     )
 
 
@@ -174,12 +216,13 @@ async def get_public_booking_website_asset(
     slug: str,
     asset_type: str,
     request: Request,
+    settings: Settings = Depends(get_settings),
     service: BookingWebsiteService = Depends(get_booking_website_service),
 ) -> Response:
     data, content_type = await service.get_public_website_asset(
         slug=slug,
         asset_type=asset_type,
-        client_ip=_extract_client_ip(request),
+        client_ip=resolve_client_ip(request, settings),
     )
     return Response(
         content=data,
@@ -201,11 +244,12 @@ async def create_public_website_voice_session(
     slug: str,
     payload: PublicWebsiteVoiceSessionRequest,
     request: Request,
+    settings: Settings = Depends(get_settings),
     bridge: PublicWebsiteVoiceBridgeService = Depends(get_public_website_voice_bridge_service),
 ) -> PublicWebsiteVoiceSessionResponse:
     return await bridge.create_public_voice_session(
         slug=slug,
-        client_ip=_extract_client_ip(request),
+        client_ip=resolve_client_ip(request, settings),
         payload=payload,
     )
 
@@ -220,10 +264,11 @@ async def execute_public_website_voice_tool(
     slug: str,
     payload: PublicWebsiteVoiceToolRequest,
     request: Request,
+    settings: Settings = Depends(get_settings),
     bridge: PublicWebsiteVoiceBridgeService = Depends(get_public_website_voice_bridge_service),
 ) -> VoiceToolExecutionResponse:
     return await bridge.execute_public_voice_tool(
         slug=slug,
-        client_ip=_extract_client_ip(request),
+        client_ip=resolve_client_ip(request, settings),
         payload=payload,
     )

@@ -17,7 +17,7 @@ import logging
 import time
 from typing import Any, Callable, Coroutine, Dict, List, Optional
 from uuid import UUID
-from fastapi import HTTPException, status
+from fastapi import Depends, HTTPException, status
 from pydantic import ValidationError
 from app.core.auth import AuthenticatedUser
 from app.agents.context import (
@@ -66,6 +66,8 @@ from app.modules.salons.service import (
     SalonWorkflowService,
     build_salon_workflow_service,
 )
+from app.core.config import Settings, get_settings
+from app.core.state_protocols import ContextStoreProtocol, RateLimiterProtocol
 from app.modules.voice.rate_limit import VoiceSessionRateLimiter, get_voice_rate_limiter
 
 WEEKDAY_NAMES = {
@@ -114,9 +116,9 @@ class AgentOrchestrator:
     def __init__(
         self,
         *,
-        context_manager: Optional[ConversationContextManager] = None,
+        context_manager: Optional[ContextStoreProtocol] = None,
         intent_classifier: Optional[IntentClassifier] = None,
-        rate_limiter: Optional[VoiceSessionRateLimiter] = None,
+        rate_limiter: Optional[RateLimiterProtocol] = None,
         max_tool_calls_per_turn: int = 3,
         tool_timeout_seconds: float = 5.0,
         response_timeout_seconds: float = 8.0,
@@ -137,7 +139,7 @@ class AgentOrchestrator:
         self._clinic_service = clinic_service or get_clinic_workflow_service()
 
     @property
-    def context_manager(self) -> ConversationContextManager:
+    def context_manager(self) -> ContextStoreProtocol:
         """Return the context manager bound to this orchestrator."""
         return self._context_manager
 
@@ -1324,7 +1326,27 @@ class AgentOrchestrator:
 _default_orchestrator = AgentOrchestrator()
 
 
-def get_agent_orchestrator() -> AgentOrchestrator:
-    """Return the singleton Stage 4 AgentOrchestrator."""
+def get_agent_orchestrator(
+    settings: Settings = Depends(get_settings),
+    context_manager: ContextStoreProtocol = Depends(get_conversation_context_manager),
+    rate_limiter: RateLimiterProtocol = Depends(get_voice_rate_limiter),
+) -> AgentOrchestrator:
+    """Return the configured Stage 4 AgentOrchestrator."""
+    resolved_settings = settings if isinstance(settings, Settings) else get_settings()
+    if resolved_settings.is_redis_configured or resolved_settings.is_production:
+        resolved_ctx = (
+            context_manager
+            if isinstance(context_manager, ContextStoreProtocol)
+            else get_conversation_context_manager(resolved_settings)
+        )
+        resolved_rl = (
+            rate_limiter
+            if isinstance(rate_limiter, RateLimiterProtocol)
+            else get_voice_rate_limiter(resolved_settings)
+        )
+        return AgentOrchestrator(
+            context_manager=resolved_ctx,
+            rate_limiter=resolved_rl,
+        )
     return _default_orchestrator
 
