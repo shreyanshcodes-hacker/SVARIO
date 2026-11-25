@@ -18,6 +18,7 @@ import {
   updateClinicDoctor,
   upsertClinicDoctorWorkingHours,
 } from "@/lib/api";
+import { SectionContentSkeleton } from "@/components/ui/LoadingSkeleton";
 import type {
   ClinicAppointment,
   ClinicAvailableSlot,
@@ -415,9 +416,7 @@ export function ClinicDashboardView({
       </div>
 
       {isLoading ? (
-        <div className="py-8 text-center font-mono text-xs text-[#A7B0C4]">
-          Loading clinic data...
-        </div>
+        <SectionContentSkeleton label="Loading clinic data..." rows={4} />
       ) : (
         <div className="mt-5">
           {/* Appointments Tab */}

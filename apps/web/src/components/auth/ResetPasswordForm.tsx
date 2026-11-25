@@ -49,9 +49,7 @@ export function ResetPasswordForm(): React.JSX.Element {
       }
 
       setResetComplete(true);
-      setTimeout(() => {
-        router.push("/dashboard");
-      }, 1500);
+      router.push("/dashboard");
     } catch (err: unknown) {
       setErrorMessage(
         err instanceof Error ? err.message : "Failed to update password."

@@ -10,6 +10,10 @@ import { useAuthOrganization } from "@/context/AuthOrganizationContext";
 import { fetchOnboardingBundle } from "@/lib/api";
 import { ClinicDashboardView } from "@/components/dashboard/ClinicDashboardView";
 import { SalonDashboardView } from "@/components/dashboard/SalonDashboardView";
+import {
+  DashboardWorkspaceSkeleton,
+  SkeletonBlock,
+} from "@/components/ui/LoadingSkeleton";
 import type { OnboardingBundleData } from "@/types/platform";
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -88,14 +92,15 @@ export default function DashboardPage(): React.JSX.Element {
 
   if (isInitializing) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#0B1020] text-[#F5F7FC]">
-        <div
-          role="status"
-          className="rounded-2xl border border-[#A7B0C4]/20 bg-[#171D33]/90 px-6 py-4 font-mono text-xs text-[#36C6D3]"
-        >
-          Restoring authenticated Svario session...
+      <main className="min-h-screen bg-[#0B1020] text-[#F5F7FC]">
+        <div className="mx-auto max-w-6xl space-y-6 px-6 py-10">
+          <div className="flex items-center justify-between border-b border-[#A7B0C4]/15 pb-4">
+            <SkeletonBlock className="h-8 w-32" />
+            <SkeletonBlock className="h-8 w-44 rounded-xl" />
+          </div>
+          <DashboardWorkspaceSkeleton label="Checking session..." cards={3} />
         </div>
-      </div>
+      </main>
     );
   }
 
@@ -229,9 +234,10 @@ export default function DashboardPage(): React.JSX.Element {
 
         {/* Organization Onboarding or Active Workspace */}
         {isLoadingOrganizations ? (
-          <div className="rounded-2xl border border-[#A7B0C4]/20 bg-[#171D33]/70 p-8 text-center text-xs text-[#A7B0C4]">
-            Loading your workspaces...
-          </div>
+          <DashboardWorkspaceSkeleton
+            label="Loading your workspaces..."
+            cards={3}
+          />
         ) : organizations.length === 0 || showCreateModal ? (
           <OrganizationOnboardingForm
             onSuccess={() => setShowCreateModal(false)}
@@ -277,9 +283,25 @@ export default function DashboardPage(): React.JSX.Element {
                 </div>
               </div>
 
-              {isLoadingBundle && (
-                <div className="rounded-xl border border-[#A7B0C4]/15 bg-[#0B1020]/60 p-4 text-xs text-[#36C6D3]">
-                  Loading your business configuration...
+              {isLoadingBundle && !onboardingBundle && (
+                <div
+                  role="status"
+                  aria-label="Loading your business configuration..."
+                  className="grid gap-4 md:grid-cols-3"
+                >
+                  <span className="sr-only">
+                    Loading your business configuration...
+                  </span>
+                  {Array.from({ length: 3 }).map((_, idx) => (
+                    <div
+                      key={idx}
+                      className="space-y-2.5 rounded-xl border border-[#A7B0C4]/15 bg-[#0B1020]/60 p-4"
+                    >
+                      <SkeletonBlock className="h-3 w-24 bg-[#36C6D3]/20" />
+                      <SkeletonBlock className="h-4 w-36" />
+                      <SkeletonBlock className="h-3 w-full" />
+                    </div>
+                  ))}
                 </div>
               )}
 

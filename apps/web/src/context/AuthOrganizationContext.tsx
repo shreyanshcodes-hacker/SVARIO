@@ -150,11 +150,17 @@ export function AuthOrganizationProvider({
         if (error) {
           setSession(null);
           setSupabaseUser(null);
+          setVerifiedBackendUser(null);
+          setOrganizations([]);
+          setActiveOrgIdState(null);
         } else {
           setSession(data.session);
           setSupabaseUser(data.session?.user ?? null);
           if (data.session) {
-            await syncBackendIdentityAndOrganizations(data.session);
+            setIsLoadingOrganizations(true);
+            void syncBackendIdentityAndOrganizations(data.session);
+          } else {
+            void syncBackendIdentityAndOrganizations(null);
           }
         }
       } finally {

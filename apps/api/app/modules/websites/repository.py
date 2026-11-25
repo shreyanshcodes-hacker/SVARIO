@@ -456,9 +456,18 @@ class SupabaseRestBookingWebsiteRepository:
                 content=data,
             )
         if resp.status_code >= 400:
+            upstream_detail = ""
+            try:
+                err_body = resp.json()
+                if isinstance(err_body, dict):
+                    raw_msg = err_body.get("message") or err_body.get("error") or ""
+                    if isinstance(raw_msg, str) and raw_msg.strip():
+                        upstream_detail = f": {raw_msg.strip()[:160]}"
+            except Exception:
+                pass
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Brand asset upload failed (HTTP {resp.status_code}).",
+                detail=f"Brand asset upload failed (HTTP {resp.status_code}){upstream_detail}.",
             )
         return (await self.resolve_asset_url(actor, storage_path)) or ""
 

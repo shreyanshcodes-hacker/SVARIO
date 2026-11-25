@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { SectionContentSkeleton } from "@/components/ui/LoadingSkeleton";
 import {
   createBusinessFaqApi,
   deleteBusinessFaqApi,
@@ -620,12 +621,10 @@ export function OnboardingWizard({
 
   if (isLoading) {
     return (
-      <div
-        role="status"
-        className="rounded-2xl border border-[#A7B0C4]/20 bg-[#171D33]/80 p-8 text-center font-mono text-xs text-[#36C6D3]"
-      >
-        Loading your business configuration...
-      </div>
+      <SectionContentSkeleton
+        label="Loading your business configuration..."
+        rows={4}
+      />
     );
   }
 

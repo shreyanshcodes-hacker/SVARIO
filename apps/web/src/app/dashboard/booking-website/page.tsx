@@ -6,6 +6,10 @@ import { useRouter } from "next/navigation";
 import { SvarioBrandLogo } from "@/components/SvarioBrandLogo";
 import { OrganizationSwitcher } from "@/components/organizations/OrganizationSwitcher";
 import { BookingWebsiteWorkspace } from "@/components/website/BookingWebsiteWorkspace";
+import {
+  BookingStudioSkeleton,
+  SkeletonBlock,
+} from "@/components/ui/LoadingSkeleton";
 import { useAuthOrganization } from "@/context/AuthOrganizationContext";
 
 export default function BookingWebsiteDashboardPage(): React.JSX.Element {
@@ -27,13 +31,28 @@ export default function BookingWebsiteDashboardPage(): React.JSX.Element {
     }
   }, [isInitializing, isAuthenticated, router]);
 
-  if (isInitializing || !isAuthenticated) {
+  if (isInitializing) {
+    return (
+      <main className="min-h-screen bg-[#0B1020] text-[#F5F7FC]">
+        <div className="mx-auto max-w-6xl space-y-6 px-6 py-10">
+          <div className="flex items-center justify-between border-b border-[#A7B0C4]/15 pb-4">
+            <SkeletonBlock className="h-8 w-32" />
+            <SkeletonBlock className="h-8 w-44 rounded-xl" />
+          </div>
+          <BookingStudioSkeleton />
+        </div>
+      </main>
+    );
+  }
+
+  if (!isAuthenticated) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0B1020] text-[#F5F7FC]">
-        <div className="rounded-2xl border border-[#A7B0C4]/20 bg-[#171D33]/90 px-6 py-4 font-mono text-xs text-[#36C6D3]">
-          {isInitializing
-            ? "Restoring authenticated Svario session..."
-            : "Redirecting to /login..."}
+        <div
+          role="status"
+          className="rounded-2xl border border-[#A7B0C4]/20 bg-[#171D33]/90 px-6 py-4 font-mono text-xs text-[#A7B0C4]"
+        >
+          Redirecting to /login...
         </div>
       </div>
     );

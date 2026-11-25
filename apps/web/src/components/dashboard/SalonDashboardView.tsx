@@ -23,6 +23,7 @@ import {
   rescheduleSalonAppointment,
   updateSalonService,
 } from "@/lib/api";
+import { SectionContentSkeleton } from "@/components/ui/LoadingSkeleton";
 
 interface SalonDashboardViewProps {
   accessToken: string;
@@ -423,9 +424,7 @@ export function SalonDashboardView({
       </div>
 
       {loading && (
-        <div className="rounded-2xl border border-[#A7B0C4]/15 bg-[#171D33]/50 p-8 text-center text-xs text-[#36C6D3]">
-          Loading salon records...
-        </div>
+        <SectionContentSkeleton label="Loading salon records..." rows={4} />
       )}
 
       {/* TAB 1: APPOINTMENTS */}

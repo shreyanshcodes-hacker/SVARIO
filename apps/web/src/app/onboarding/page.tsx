@@ -7,6 +7,11 @@ import { SvarioBrandLogo } from "@/components/SvarioBrandLogo";
 import { OrganizationOnboardingForm } from "@/components/organizations/OrganizationOnboardingForm";
 import { OrganizationSwitcher } from "@/components/organizations/OrganizationSwitcher";
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
+import {
+  DashboardWorkspaceSkeleton,
+  SectionContentSkeleton,
+  SkeletonBlock,
+} from "@/components/ui/LoadingSkeleton";
 import { useAuthOrganization } from "@/context/AuthOrganizationContext";
 
 export default function OnboardingPage(): React.JSX.Element {
@@ -35,14 +40,15 @@ export default function OnboardingPage(): React.JSX.Element {
 
   if (isInitializing) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#0B1020] text-[#F5F7FC]">
-        <div
-          role="status"
-          className="rounded-2xl border border-[#A7B0C4]/20 bg-[#171D33]/90 px-6 py-4 font-mono text-xs text-[#36C6D3]"
-        >
-          Restoring authenticated Svario session...
+      <main className="min-h-screen bg-[#0B1020] text-[#F5F7FC]">
+        <div className="mx-auto max-w-6xl space-y-6 px-6 py-10">
+          <div className="flex items-center justify-between border-b border-[#A7B0C4]/15 pb-4">
+            <SkeletonBlock className="h-8 w-32" />
+            <SkeletonBlock className="h-8 w-44 rounded-xl" />
+          </div>
+          <DashboardWorkspaceSkeleton label="Checking session..." cards={3} />
         </div>
-      </div>
+      </main>
     );
   }
 
@@ -92,9 +98,10 @@ export default function OnboardingPage(): React.JSX.Element {
 
       <main className="mx-auto max-w-7xl space-y-8 px-6 py-10">
         {isLoadingOrganizations ? (
-          <div className="rounded-2xl border border-[#A7B0C4]/20 bg-[#171D33]/70 p-8 text-center font-mono text-xs text-[#A7B0C4]">
-            Loading organization memberships from Svario API...
-          </div>
+          <SectionContentSkeleton
+            label="Loading organization memberships from Svario API..."
+            rows={3}
+          />
         ) : organizations.length === 0 || showCreateModal ? (
           <OrganizationOnboardingForm
             onSuccess={() => setShowCreateModal(false)}
