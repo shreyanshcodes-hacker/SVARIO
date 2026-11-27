@@ -120,21 +120,27 @@ export default function LandingPage(): React.JSX.Element {
 
       {/* Footer */}
       <footer className="relative z-10 mt-20 border-t border-[#A7B0C4]/15 bg-[#0B1020]/90 py-10">
-        <div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-6 px-6 text-xs text-[#A7B0C4] sm:flex-row sm:items-center">
-          <SvarioBrandLogo compact />
-          <div className="flex flex-wrap items-center gap-5">
-            <Link href="/about" className="transition hover:text-[#F5F7FC]">
-              About
-            </Link>
-            <a href="#pricing" className="transition hover:text-[#F5F7FC]">
-              Pricing
-            </a>
-            <Link href="/login" className="transition hover:text-[#F5F7FC]">
-              Sign In
-            </Link>
-            <Link href="/signup" className="transition hover:text-[#F5F7FC]">
-              Get Started
-            </Link>
+        <div className="mx-auto max-w-7xl px-6 text-xs text-[#A7B0C4]">
+          <div className="flex flex-col items-start justify-between gap-6 sm:flex-row sm:items-center">
+            <SvarioBrandLogo compact />
+            <div className="flex flex-wrap items-center gap-5">
+              <Link href="/about" className="transition hover:text-[#F5F7FC]">
+                About
+              </Link>
+              <a href="#pricing" className="transition hover:text-[#F5F7FC]">
+                Pricing
+              </a>
+              <Link href="/login" className="transition hover:text-[#F5F7FC]">
+                Sign In
+              </Link>
+              <Link href="/signup" className="transition hover:text-[#F5F7FC]">
+                Get Started
+              </Link>
+            </div>
+          </div>
+          <div className="mt-8 flex flex-col items-start justify-between gap-2 border-t border-[#A7B0C4]/10 pt-6 text-[#A7B0C4]/75 sm:flex-row sm:items-center">
+            <p>&copy; {new Date().getFullYear()} Svario. All rights reserved.</p>
+            <p>Powered by Shreyanshcodes</p>
           </div>
         </div>
       </footer>
