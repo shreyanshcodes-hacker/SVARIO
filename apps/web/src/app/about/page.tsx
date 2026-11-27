@@ -88,7 +88,7 @@ export default function AboutPage(): React.JSX.Element {
             <div className="mx-auto w-full max-w-[260px] md:max-w-none">
               <div className="relative aspect-square overflow-hidden rounded-2xl border border-[#7657F6]/45 bg-[#0B1020] shadow-[0_0_32px_rgba(118,87,246,0.22)]">
                 <Image
-                  src="apps/web/public/founder-shreyansh.png"
+                  src="/founder-shreyansh.png"
                   alt="Shreyansh Jaiswal — Founder & CEO, Svario"
                   width={480}
                   height={480}
