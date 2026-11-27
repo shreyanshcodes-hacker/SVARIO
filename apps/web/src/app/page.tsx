@@ -61,7 +61,7 @@ export default function LandingPage(): React.JSX.Element {
         {/* Hero / Product Overview */}
         <section className="max-w-4xl space-y-6">
           <div className="inline-flex items-center gap-2 rounded-full border border-[#36C6D3]/35 bg-[#171D33]/80 px-3.5 py-1 font-mono text-xs text-[#36C6D3]">
-            <span>AI VOICE RECEPTIONIST FOR SALONS</span>
+            <span>AI VOICE RECEPTIONIST FOR YOUR BUSINESS</span>
           </div>
 
           <h1 className="text-4xl font-extrabold tracking-tight text-[#F5F7FC] sm:text-5xl lg:text-6xl">
